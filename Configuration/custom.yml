@@ -1,45 +1,58 @@
 ---
 title: Null OS
-description: Null OS root playbook - AME Wizard Beta entry point
-# AME Wizard runs Configuration\custom.yml by convention. Every action is gated
-# on a feature <Name> from playbook.conf via `option:` ('X' = checked, '!X' = unchecked).
-#
-# Directive forms:
-#   reg import / cmd        -> !cmd        (exeDir:true => cwd = playbook root)
-#   PowerShell script       -> !powerShell (HKCU resolves to the real user via
-#                                           runas: currentUserElevated)
-#   direct exe              -> !run
-#   single registry value   -> !registryValue
-#   service / appx / task   -> !service / !appx / !scheduledTask (run as TI)
+description: Null OS root playbook - AME Wizard Beta entry point (self-contained)
+# Self-contained on purpose. AME's launched-process working directory (exeDir)
+# is invalid under the TrustedInstaller node on this engine, so reg-import and
+# external .ps1 launches fail with "the directory name is invalid". Everything
+# here uses only forms proven to work: native directives (!registryValue,
+# !service, !appx, !scheduledTask) and inline !powerShell with NO exeDir.
+# Each action is gated on a feature <Name> from playbook.conf via `option:`.
 actions:
 
   # ===========================================================================
-  # 0. ROLLBACK SAFETY NET - always first, never gated.
+  # 0. ROLLBACK SAFETY NET (restore point + raw reg/BCD backup)
   # ===========================================================================
-  - !writeStatus: {status: 'Null OS: creating restore point and registry backups'}
+  - !writeStatus: {status: 'Null OS: creating restore point and backups'}
   - !powerShell:
-    command: '.\Scripts\Backup-Restore.ps1'
-    exeDir: true
     wait: true
-    runas: currentUserElevated
+    command: |
+      try {
+        Enable-ComputerRestore -Drive "$env:SystemDrive\" -ErrorAction Stop
+        New-Item -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SystemRestore' -Force -ErrorAction SilentlyContinue | Out-Null
+        New-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SystemRestore' -Name 'SystemRestorePointCreationFrequency' -Value 0 -PropertyType DWord -Force -ErrorAction SilentlyContinue | Out-Null
+        Checkpoint-Computer -Description 'Null OS Pre-Apply' -RestorePointType 'MODIFY_SETTINGS' -ErrorAction Stop
+      } catch { Write-Output "restore point skipped: $($_.Exception.Message)" }
+      $b = "$env:SystemDrive\NullOS-Backup"
+      New-Item -ItemType Directory -Path $b -Force -ErrorAction SilentlyContinue | Out-Null
+      reg export 'HKLM\SYSTEM\CurrentControlSet\Services' "$b\services.reg" /y 2>$null
+      reg export 'HKLM\SOFTWARE\Policies\Microsoft\Windows' "$b\policies.reg" /y 2>$null
+      bcdedit /export "$b\bcd.bak" 2>$null
+      Write-Output "Backups in $b"
 
-  # Load the default user hive so per-user privacy changes also apply to NEW
-  # accounts created later. Unloaded at the end.
-  - !powerShell:
-    command: 'reg load HKU\AME_UserHive_Default C:\Users\Default\NTUSER.DAT'
-    wait: true
+  # Load the default user hive so per-user changes also reach NEW accounts.
+  - !powerShell: {wait: true, command: 'reg load HKU\AME_UserHive_Default C:\Users\Default\NTUSER.DAT'}
 
   # ===========================================================================
   # 1. TELEMETRY
   # ===========================================================================
   - !writeStatus: {status: 'Removing telemetry and diagnostics'}
   - !service: {name: 'DiagTrack', operation: stop, ignoreErrors: true, option: 'Telemetry'}
-  - !cmd:
-    command: 'reg import Configuration\Telemetry.reg'
-    exeDir: true
-    wait: true
-    runas: currentUserElevated
-    option: 'Telemetry'
+
+  - !registryValue: {path: 'HKLM\SOFTWARE\Policies\Microsoft\Windows\DataCollection', value: 'AllowTelemetry', data: '0', type: REG_DWORD, option: 'Telemetry'}
+  - !registryValue: {path: 'HKLM\SOFTWARE\Policies\Microsoft\Windows\DataCollection', value: 'MaxTelemetryAllowed', data: '0', type: REG_DWORD, option: 'Telemetry'}
+  - !registryValue: {path: 'HKLM\SOFTWARE\Policies\Microsoft\Windows\DataCollection', value: 'DoNotShowFeedbackNotifications', data: '1', type: REG_DWORD, option: 'Telemetry'}
+  - !registryValue: {path: 'HKLM\SOFTWARE\Policies\Microsoft\Windows\DataCollection', value: 'AllowDeviceNameInTelemetry', data: '0', type: REG_DWORD, option: 'Telemetry'}
+  - !registryValue: {path: 'HKLM\SOFTWARE\Policies\Microsoft\Windows\DataCollection', value: 'DisableOneSettingsDownloads', data: '1', type: REG_DWORD, option: 'Telemetry'}
+  - !registryValue: {path: 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\DataCollection', value: 'AllowTelemetry', data: '0', type: REG_DWORD, option: 'Telemetry'}
+  - !registryValue: {path: 'HKLM\SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Policies\DataCollection', value: 'AllowTelemetry', data: '0', type: REG_DWORD, option: 'Telemetry'}
+  - !registryValue: {path: 'HKLM\SYSTEM\CurrentControlSet\Control\WMI\Autologger\AutoLogger-Diagtrack-Listener', value: 'Start', data: '0', type: REG_DWORD, option: 'Telemetry'}
+  - !registryValue: {path: 'HKLM\SYSTEM\CurrentControlSet\Control\WMI\Autologger\Diagtrack-Listener', value: 'Start', data: '0', type: REG_DWORD, option: 'Telemetry'}
+  - !registryValue: {path: 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Diagnostics\DiagTrack\EventTranscriptKey', value: 'EnableEventTranscript', data: '0', type: REG_DWORD, option: 'Telemetry'}
+  - !registryValue: {path: 'HKLM\SOFTWARE\Policies\Microsoft\SQMClient\Windows', value: 'CEIPEnable', data: '0', type: REG_DWORD, option: 'Telemetry'}
+  - !registryValue: {path: 'HKLM\SOFTWARE\Policies\Microsoft\Windows\AppCompat', value: 'AITEnable', data: '0', type: REG_DWORD, option: 'Telemetry'}
+  - !registryValue: {path: 'HKLM\SOFTWARE\Policies\Microsoft\Windows\AppCompat', value: 'DisableInventory', data: '1', type: REG_DWORD, option: 'Telemetry'}
+  - !registryValue: {path: 'HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting', value: 'Disabled', data: '1', type: REG_DWORD, option: 'Telemetry'}
+  - !registryValue: {path: 'HKLM\SOFTWARE\Policies\Microsoft\Windows\Windows Error Reporting', value: 'Disabled', data: '1', type: REG_DWORD, option: 'Telemetry'}
 
   - !service: {name: 'DiagTrack', operation: change, startup: 4, ignoreErrors: true, option: 'Telemetry'}
   - !service: {name: 'dmwappushservice', operation: change, startup: 4, ignoreErrors: true, option: 'Telemetry'}
@@ -47,91 +60,169 @@ actions:
   - !scheduledTask: {path: '\Microsoft\Windows\Application Experience\Microsoft Compatibility Appraiser', operation: disable, ignoreErrors: true, option: 'Telemetry'}
   - !scheduledTask: {path: '\Microsoft\Windows\Application Experience\ProgramDataUpdater', operation: disable, ignoreErrors: true, option: 'Telemetry'}
   - !scheduledTask: {path: '\Microsoft\Windows\Application Experience\StartupAppTask', operation: disable, ignoreErrors: true, option: 'Telemetry'}
-  - !scheduledTask: {path: '\Microsoft\Windows\Application Experience\PcaPatchDbTask', operation: disable, ignoreErrors: true, option: 'Telemetry'}
   - !scheduledTask: {path: '\Microsoft\Windows\Customer Experience Improvement Program\Consolidator', operation: disable, ignoreErrors: true, option: 'Telemetry'}
   - !scheduledTask: {path: '\Microsoft\Windows\Customer Experience Improvement Program\UsbCeip', operation: disable, ignoreErrors: true, option: 'Telemetry'}
   - !scheduledTask: {path: '\Microsoft\Windows\Autochk\Proxy', operation: disable, ignoreErrors: true, option: 'Telemetry'}
   - !scheduledTask: {path: '\Microsoft\Windows\Feedback\Siuf\DmClient', operation: disable, ignoreErrors: true, option: 'Telemetry'}
   - !scheduledTask: {path: '\Microsoft\Windows\Feedback\Siuf\DmClientOnScenarioDownload', operation: disable, ignoreErrors: true, option: 'Telemetry'}
   - !scheduledTask: {path: '\Microsoft\Windows\Windows Error Reporting\QueueReporting', operation: disable, ignoreErrors: true, option: 'Telemetry'}
-  - !scheduledTask: {path: '\Microsoft\Windows\DiskDiagnostic\Microsoft-Windows-DiskDiagnosticDataCollector', operation: disable, ignoreErrors: true, option: 'Telemetry'}
 
   # ===========================================================================
-  # 2. PRIVACY (current user + default user hive)
+  # 2. PRIVACY (machine + current user)
   # ===========================================================================
   - !writeStatus: {status: 'Applying privacy lockdown'}
-  - !cmd:
-    command: 'reg import Configuration\Privacy.reg'
-    exeDir: true
-    wait: true
-    runas: currentUserElevated
-    option: 'Privacy'
-
-  - !cmd:
-    command: 'reg import Configuration\DefaultUser.reg'
-    exeDir: true
-    wait: true
-    option: 'Privacy'
+  # -- Machine-wide policies --
+  - !registryValue: {path: 'HKLM\SOFTWARE\Policies\Microsoft\Windows\AdvertisingInfo', value: 'DisabledByGroupPolicy', data: '1', type: REG_DWORD, option: 'Privacy'}
+  - !registryValue: {path: 'HKLM\SOFTWARE\Policies\Microsoft\Windows\LocationAndSensors', value: 'DisableLocation', data: '1', type: REG_DWORD, option: 'Privacy'}
+  - !registryValue: {path: 'HKLM\SOFTWARE\Policies\Microsoft\Windows\System', value: 'EnableActivityFeed', data: '0', type: REG_DWORD, option: 'Privacy'}
+  - !registryValue: {path: 'HKLM\SOFTWARE\Policies\Microsoft\Windows\System', value: 'PublishUserActivities', data: '0', type: REG_DWORD, option: 'Privacy'}
+  - !registryValue: {path: 'HKLM\SOFTWARE\Policies\Microsoft\Windows\System', value: 'UploadUserActivities', data: '0', type: REG_DWORD, option: 'Privacy'}
+  - !registryValue: {path: 'HKLM\SOFTWARE\Policies\Microsoft\Windows\Windows Search', value: 'AllowCortana', data: '0', type: REG_DWORD, option: 'Privacy'}
+  - !registryValue: {path: 'HKLM\SOFTWARE\Policies\Microsoft\Windows\Windows Search', value: 'DisableWebSearch', data: '1', type: REG_DWORD, option: 'Privacy'}
+  - !registryValue: {path: 'HKLM\SOFTWARE\Policies\Microsoft\Windows\Windows Search', value: 'ConnectedSearchUseWeb', data: '0', type: REG_DWORD, option: 'Privacy'}
+  - !registryValue: {path: 'HKLM\SOFTWARE\Policies\Microsoft\InputPersonalization', value: 'AllowInputPersonalization', data: '0', type: REG_DWORD, option: 'Privacy'}
+  - !registryValue: {path: 'HKLM\SOFTWARE\Policies\Microsoft\Windows\CloudContent', value: 'DisableWindowsConsumerFeatures', data: '1', type: REG_DWORD, option: 'Privacy'}
+  - !registryValue: {path: 'HKLM\SOFTWARE\Policies\Microsoft\Windows\CloudContent', value: 'DisableSoftLanding', data: '1', type: REG_DWORD, option: 'Privacy'}
+  - !registryValue: {path: 'HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot', value: 'TurnOffWindowsCopilot', data: '1', type: REG_DWORD, option: 'Privacy'}
+  - !registryValue: {path: 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location', value: 'Value', data: 'Deny', type: REG_SZ, option: 'Privacy'}
+  - !registryValue: {path: 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\appDiagnostics', value: 'Value', data: 'Deny', type: REG_SZ, option: 'Privacy'}
+  # -- Current user --
+  - !registryValue: {path: 'HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\AdvertisingInfo', value: 'Enabled', data: '0', type: REG_DWORD, option: 'Privacy'}
+  - !registryValue: {path: 'HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Privacy', value: 'TailoredExperiencesWithDiagnosticDataEnabled', data: '0', type: REG_DWORD, option: 'Privacy'}
+  - !registryValue: {path: 'HKCU\SOFTWARE\Microsoft\Speech_OneCore\Settings\OnlineSpeechPrivacy', value: 'HasAccepted', data: '0', type: REG_DWORD, option: 'Privacy'}
+  - !registryValue: {path: 'HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager', value: 'SilentInstalledAppsEnabled', data: '0', type: REG_DWORD, option: 'Privacy'}
+  - !registryValue: {path: 'HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager', value: 'SystemPaneSuggestionsEnabled', data: '0', type: REG_DWORD, option: 'Privacy'}
+  - !registryValue: {path: 'HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager', value: 'SubscribedContentEnabled', data: '0', type: REG_DWORD, option: 'Privacy'}
+  - !registryValue: {path: 'HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager', value: 'PreInstalledAppsEnabled', data: '0', type: REG_DWORD, option: 'Privacy'}
+  - !registryValue: {path: 'HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager', value: 'OemPreInstalledAppsEnabled', data: '0', type: REG_DWORD, option: 'Privacy'}
+  - !registryValue: {path: 'HKCU\SOFTWARE\Microsoft\Siuf\Rules', value: 'NumberOfSIUFInPeriod', data: '0', type: REG_DWORD, option: 'Privacy'}
+  - !registryValue: {path: 'HKCU\SOFTWARE\Policies\Microsoft\Windows\Explorer', value: 'DisableSearchBoxSuggestions', data: '1', type: REG_DWORD, option: 'Privacy'}
+  - !registryValue: {path: 'HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Search', value: 'BingSearchEnabled', data: '0', type: REG_DWORD, option: 'Privacy'}
+  - !registryValue: {path: 'HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\SearchSettings', value: 'IsAADCloudSearchEnabled', data: '0', type: REG_DWORD, option: 'Privacy'}
+  - !registryValue: {path: 'HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\SearchSettings', value: 'IsMSACloudSearchEnabled', data: '0', type: REG_DWORD, option: 'Privacy'}
+  - !registryValue: {path: 'HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\SearchSettings', value: 'IsDeviceSearchHistoryEnabled', data: '0', type: REG_DWORD, option: 'Privacy'}
+  - !registryValue: {path: 'HKCU\SOFTWARE\Microsoft\Input\TIPC', value: 'Enabled', data: '0', type: REG_DWORD, option: 'Privacy'}
+  - !registryValue: {path: 'HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer', value: 'NoInstrumentation', data: '1', type: REG_DWORD, option: 'Privacy'}
+  # -- New users (default hive) --
+  - !registryValue: {path: 'HKU\AME_UserHive_Default\SOFTWARE\Microsoft\Windows\CurrentVersion\AdvertisingInfo', value: 'Enabled', data: '0', type: REG_DWORD, option: 'Privacy'}
+  - !registryValue: {path: 'HKU\AME_UserHive_Default\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager', value: 'SilentInstalledAppsEnabled', data: '0', type: REG_DWORD, option: 'Privacy'}
+  - !registryValue: {path: 'HKU\AME_UserHive_Default\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager', value: 'SubscribedContentEnabled', data: '0', type: REG_DWORD, option: 'Privacy'}
+  - !registryValue: {path: 'HKU\AME_UserHive_Default\SOFTWARE\Microsoft\Windows\CurrentVersion\Search', value: 'BingSearchEnabled', data: '0', type: REG_DWORD, option: 'Privacy'}
 
   # ===========================================================================
-  # 2b. NETWORK HARDENING + STACK TUNING
+  # 3. NETWORK HARDENING + STACK TUNING
   # ===========================================================================
   - !writeStatus: {status: 'Hardening and tuning the network stack'}
-  - !cmd:
-    command: 'reg import Configuration\Network.reg'
-    exeDir: true
-    wait: true
-    runas: currentUserElevated
-    option: 'Networking'
+  - !registryValue: {path: 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient', value: 'EnableMulticast', data: '0', type: REG_DWORD, option: 'Networking'}
+  - !registryValue: {path: 'HKLM\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters', value: 'RestrictNullSessAccess', data: '1', type: REG_DWORD, option: 'Networking'}
+  - !registryValue: {path: 'HKLM\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters', value: 'DisableBandwidthThrottling', data: '1', type: REG_DWORD, option: 'Networking'}
+  - !registryValue: {path: 'HKLM\SYSTEM\CurrentControlSet\Control\Lsa', value: 'RestrictAnonymous', data: '1', type: REG_DWORD, option: 'Networking'}
+  - !registryValue: {path: 'HKLM\SYSTEM\CurrentControlSet\Control\Lsa', value: 'RestrictAnonymousSAM', data: '1', type: REG_DWORD, option: 'Networking'}
+  - !registryValue: {path: 'HKLM\SYSTEM\CurrentControlSet\Control\Remote Assistance', value: 'fAllowToGetHelp', data: '0', type: REG_DWORD, option: 'Networking'}
   - !run: {exe: 'netsh', args: 'advfirewall firewall set rule group="Remote Assistance" new enable=no', option: 'Networking'}
 
   # ===========================================================================
-  # 3. SERVICE CULL (bulk static list)
+  # 4. SERVICE CULL (core kept: WSearch, Audio, Wi-Fi, Themes, FrameServer...)
   # ===========================================================================
   - !writeStatus: {status: 'Culling background services'}
-  - !cmd:
-    command: 'reg import Configuration\Services.reg'
-    exeDir: true
-    wait: true
-    runas: currentUserElevated
-    option: 'ServiceCull'
+  - !service: {name: 'diagnosticshub.standardcollector.service', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'WdiServiceHost', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'WdiSystemHost', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'DPS', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'PcaSvc', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'WerSvc', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'wercplsupport', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'SysMain', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'MapsBroker', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'RetailDemo', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'Fax', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'wisvc', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'RemoteRegistry', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'RemoteAccess', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'SessionEnv', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'TermService', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'UmRdpService', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'lfsvc', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'SensorService', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'SensrSvc', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'SensorDataService', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'PhoneSvc', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'TapiSrv', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'SEMgrSvc', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'WalletService', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'SCardSvr', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'ScDeviceEnum', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'CertPropSvc', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'vmicheartbeat', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'vmicvss', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'vmicshutdown', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'vmicrdv', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'vmickvpexchange', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'vmictimesync', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'WMPNetworkSvc', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'AJRouter', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'ALG', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'SharedAccess', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'TrkWks', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'stisvc', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'PushToInstall', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'WpcMonSvc', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'fhsvc', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'wbengine', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'autotimesvc', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
 
   # ===========================================================================
-  # 4. VISUAL EFFECTS
+  # 5. VISUAL EFFECTS (animations/transparency off; ClearType + DWM kept)
   # ===========================================================================
   - !writeStatus: {status: 'Trimming visual effects'}
-  - !cmd:
-    command: 'reg import Configuration\VisualFX.reg'
-    exeDir: true
-    wait: true
-    runas: currentUserElevated
-    option: 'VisualFX'
+  - !registryValue: {path: 'HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects', value: 'VisualFXSetting', data: '3', type: REG_DWORD, option: 'VisualFX'}
+  - !registryValue: {path: 'HKCU\Control Panel\Desktop', value: 'UserPreferencesMask', data: '9012038010000000', type: REG_BINARY, option: 'VisualFX'}
+  - !registryValue: {path: 'HKCU\Control Panel\Desktop', value: 'FontSmoothing', data: '2', type: REG_SZ, option: 'VisualFX'}
+  - !registryValue: {path: 'HKCU\Control Panel\Desktop', value: 'MenuShowDelay', data: '0', type: REG_SZ, option: 'VisualFX'}
+  - !registryValue: {path: 'HKCU\Control Panel\Desktop\WindowMetrics', value: 'MinAnimate', data: '0', type: REG_SZ, option: 'VisualFX'}
+  - !registryValue: {path: 'HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced', value: 'TaskbarAnimations', data: '0', type: REG_DWORD, option: 'VisualFX'}
+  - !registryValue: {path: 'HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize', value: 'EnableTransparency', data: '0', type: REG_DWORD, option: 'VisualFX'}
 
   # ===========================================================================
-  # 5. BLOATWARE
+  # 6. BLOATWARE (curated appx removal)
   # ===========================================================================
   - !writeStatus: {status: 'Removing bloatware'}
-  - !powerShell:
-    command: '.\Scripts\RemoveBloatware.ps1'
-    exeDir: true
-    wait: true
-    runas: currentUserElevated
-    option: 'Debloat'
-
-  # Xbox UWP removed only if "Keep Xbox" is UNCHECKED. GamingServices / Xbox
-  # identity provider are never targeted (gaming deps).
+  - !appx: {name: 'Microsoft.BingNews*', type: family, option: 'Debloat'}
+  - !appx: {name: 'Microsoft.BingWeather*', type: family, option: 'Debloat'}
+  - !appx: {name: 'Microsoft.BingSearch*', type: family, option: 'Debloat'}
+  - !appx: {name: 'Microsoft.Microsoft3DViewer*', type: family, option: 'Debloat'}
+  - !appx: {name: 'Microsoft.MicrosoftSolitaireCollection*', type: family, option: 'Debloat'}
+  - !appx: {name: 'Microsoft.MicrosoftOfficeHub*', type: family, option: 'Debloat'}
+  - !appx: {name: 'Microsoft.Office.OneNote*', type: family, option: 'Debloat'}
+  - !appx: {name: 'Microsoft.People*', type: family, option: 'Debloat'}
+  - !appx: {name: 'microsoft.windowscommunicationsapps*', type: family, option: 'Debloat'}
+  - !appx: {name: 'Microsoft.SkypeApp*', type: family, option: 'Debloat'}
+  - !appx: {name: 'Microsoft.Getstarted*', type: family, option: 'Debloat'}
+  - !appx: {name: 'Microsoft.GetHelp*', type: family, option: 'Debloat'}
+  - !appx: {name: 'Microsoft.WindowsFeedbackHub*', type: family, option: 'Debloat'}
+  - !appx: {name: 'Microsoft.MixedReality.Portal*', type: family, option: 'Debloat'}
+  - !appx: {name: 'Microsoft.WindowsMaps*', type: family, option: 'Debloat'}
+  - !appx: {name: 'Microsoft.WindowsSoundRecorder*', type: family, option: 'Debloat'}
+  - !appx: {name: 'Microsoft.Todos*', type: family, option: 'Debloat'}
+  - !appx: {name: 'Microsoft.PowerAutomateDesktop*', type: family, option: 'Debloat'}
+  - !appx: {name: 'Microsoft.Windows.DevHome*', type: family, option: 'Debloat'}
+  - !appx: {name: 'Microsoft.OutlookForWindows*', type: family, option: 'Debloat'}
+  - !appx: {name: 'MicrosoftTeams*', type: family, option: 'Debloat'}
+  - !appx: {name: 'MSTeams*', type: family, option: 'Debloat'}
+  - !appx: {name: 'Clipchamp.Clipchamp*', type: family, option: 'Debloat'}
+  - !appx: {name: 'Microsoft.549981C3F5F10*', type: family, option: 'Debloat'}
+  - !appx: {name: 'Microsoft.Copilot*', type: family, option: 'Debloat'}
+  - !appx: {name: 'MicrosoftCorporationII.MicrosoftFamily*', type: family, option: 'Debloat'}
+  - !appx: {name: 'Microsoft.ZuneVideo*', type: family, option: 'Debloat'}
+  - !appx: {name: 'Microsoft.ZuneMusic*', type: family, option: 'Debloat'}
+  # Xbox UWP only if "Keep Xbox" is unchecked (GamingServices always kept).
   - !appx: {name: 'Microsoft.XboxGamingOverlay*', type: family, option: '!KeepXbox'}
   - !appx: {name: 'Microsoft.XboxGameOverlay*', type: family, option: '!KeepXbox'}
   - !appx: {name: 'Microsoft.XboxSpeechToTextOverlay*', type: family, option: '!KeepXbox'}
   - !appx: {name: 'Microsoft.GamingApp*', type: family, option: '!KeepXbox'}
 
-  # Clear stale caches (always - cheap, avoids stuck UI surfaces).
-  - !appx: {operation: clearCache, name: '*MicrosoftWindows.Client.CBS*'}
-  - !appx: {operation: clearCache, name: '*Microsoft.Windows.Search*'}
-  - !appx: {operation: clearCache, name: '*Microsoft.Windows.SecHealthUI*'}
-
   # ===========================================================================
-  # 6. HARDWARE SERVICE TOGGLES (inverse-gated)
+  # 7. HARDWARE SERVICE TOGGLES (inverse-gated)
   # ===========================================================================
   - !service: {name: 'bthserv', operation: change, startup: 4, ignoreErrors: true, option: '!KeepBluetooth'}
   - !service: {name: 'BTAGService', operation: change, startup: 4, ignoreErrors: true, option: '!KeepBluetooth'}
@@ -139,96 +230,114 @@ actions:
   - !service: {name: 'PrintNotify', operation: change, startup: 4, ignoreErrors: true, option: '!KeepPrintSpooler'}
 
   # ===========================================================================
-  # 7. DISK FOOTPRINT (WinSxS)
+  # 8. PERFORMANCE / LATENCY ENGINE (inline; no exeDir)
   # ===========================================================================
-  - !writeStatus: {status: 'Reducing disk footprint'}
+  - !writeStatus: {status: 'Applying performance and latency tuning'}
+  # Common tuning (applies for both latency profiles).
   - !powerShell:
-    command: '.\Scripts\GutWinSxS.ps1 -Mode Cleanup'
-    exeDir: true
     wait: true
-    runas: currentUserElevated
-    option: 'GutWinSxS'
-
+    command: |
+      function S($p,$n,$v,$t='DWord'){ if(-not(Test-Path $p)){New-Item $p -Force|Out-Null}; New-ItemProperty -Path $p -Name $n -Value $v -PropertyType $t -Force -EA SilentlyContinue|Out-Null }
+      S 'HKLM:\SYSTEM\CurrentControlSet\Control\PriorityControl' 'Win32PrioritySeparation' 38
+      & reg add 'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile' /v NetworkThrottlingIndex /t REG_DWORD /d 0xffffffff /f | Out-Null
+      S 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile' 'SystemResponsiveness' 10
+      $g='HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games'
+      S $g 'GPU Priority' 8; S $g 'Priority' 6; S $g 'Scheduling Category' 'High' 'String'; S $g 'SFIO Priority' 'High' 'String'
+      $ifr='HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces'
+      if(Test-Path $ifr){ Get-ChildItem $ifr | ForEach-Object { S $_.PSPath 'TcpAckFrequency' 1; S $_.PSPath 'TCPNoDelay' 1; S $_.PSPath 'TcpDelAckTicks' 0 } }
+      Get-ChildItem 'HKLM:\SYSTEM\CurrentControlSet\Services' | Where-Object { $_.Name -notmatch 'Xbl|Xbox' } | ForEach-Object {
+        if($null -ne (Get-ItemProperty -Path "Registry::$_" -EA 0).Start){ Set-ItemProperty -Path "Registry::$_" -Name 'SvcHostSplitDisable' -Type DWord -Value 1 -Force -EA 0 } }
+      & fsutil behavior set disablelastaccess 1 | Out-Null
+      & fsutil 8dot3name set 1 | Out-Null
+      if([Environment]::Is64BitOperatingSystem){ & rundll32.exe fthsvc.dll,FthSysprepSpecialize 2>$null }
+      S 'HKLM:\SOFTWARE\Microsoft\FTH' 'Enabled' 0
+      S 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\BackgroundAccessApplications' 'GlobalUserDisabled' 1
+      S 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power' 'HiberbootEnabled' 0
+      S 'HKLM:\SYSTEM\CurrentControlSet\Control\Power\PowerThrottling' 'PowerThrottlingOff' 1
+      S 'HKLM:\SYSTEM\CurrentControlSet\Control\Storage' 'StorageD3InModernStandby' 0
+      S 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Task Scheduler\Maintenance' 'WakeUp' 0
+      powercfg /setactive SCHEME_MIN
+      Write-Output 'common performance tuning done'
+  # Extreme-only: full low-latency power scheme + paging off.
   - !powerShell:
-    command: '.\Scripts\GutWinSxS.ps1 -Mode ResetBase'
-    exeDir: true
     wait: true
-    runas: currentUserElevated
-    option: 'GutWinSxSResetBase'
+    option: 'LatencyExtreme'
+    command: |
+      function S($p,$n,$v,$t='DWord'){ if(-not(Test-Path $p)){New-Item $p -Force|Out-Null}; New-ItemProperty -Path $p -Name $n -Value $v -PropertyType $t -Force -EA SilentlyContinue|Out-Null }
+      S 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile' 'SystemResponsiveness' 0
+      $guid='11111111-1111-1111-1111-111111111111'
+      if(-not(powercfg /l | Select-String $guid -Quiet)){ powercfg /duplicatescheme e9a42b02-d5df-448d-aa00-03f14749eb61 $guid | Out-Null }
+      powercfg /setactive $guid
+      powercfg /changename $guid 'Null OS' 'Lowest latency, no power saving.'
+      powercfg /setacvalueindex $guid 0012ee47-9041-4b5d-9b77-535fba8b1442 d639518a-e56d-4345-8af2-b9f32fb26109 0
+      powercfg /setacvalueindex $guid 2a737441-1930-4402-8d77-b2bebba308a3 48e6b7a6-50f5-4782-a5d4-53bb8f07e226 0
+      powercfg /setacvalueindex $guid 54533251-82be-4824-96c1-47b60b740d00 893dee8e-2bef-41e0-89c6-b55d0929964c 100
+      powercfg /setacvalueindex $guid 54533251-82be-4824-96c1-47b60b740d00 4d2b0152-7d5c-498b-88e2-34345392a2c5 200
+      powercfg /setactive $guid
+      S 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' 'DisablePagingExecutive' 1
+      S 'HKLM:\SYSTEM\CurrentControlSet\Services\stornvme\Parameters\Device' 'IdlePowerMode' 0
+      Write-Output 'extreme power scheme applied'
 
   # ===========================================================================
-  # 8. KERNEL / BOOT TUNING
-  #   KernelTweaks checked       -> BCD + kernel reg (no mitigations)
-  #   DisableMitigations checked -> same + mitigations/VBS off
-  #   Both checked -> runs twice; idempotent, harmless.
+  # 9. KERNEL / BOOT TUNING (inline; no exeDir)
   # ===========================================================================
   - !writeStatus: {status: 'Applying kernel and boot tuning'}
   - !powerShell:
-    command: '.\Scripts\KernelTweaks.ps1'
-    exeDir: true
     wait: true
-    runas: currentUserElevated
     option: 'KernelTweaks'
-
+    command: |
+      & bcdedit.exe /set disabledynamictick yes 2>$null
+      & bcdedit.exe /set tscsyncpolicy Enhanced 2>$null
+      & bcdedit.exe /deletevalue useplatformclock 2>$null
+      New-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\kernel' -Name 'DistributeTimers' -Value 1 -PropertyType DWord -Force -EA SilentlyContinue | Out-Null
+      Write-Output 'kernel/BCD timer tuning done'
   - !powerShell:
-    command: '.\Scripts\KernelTweaks.ps1 -DisableMitigations'
-    exeDir: true
     wait: true
-    runas: currentUserElevated
     option: 'DisableMitigations'
+    command: |
+      $mm='HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management'
+      New-ItemProperty -Path $mm -Name 'FeatureSettingsOverride' -Value 3 -PropertyType DWord -Force -EA SilentlyContinue | Out-Null
+      New-ItemProperty -Path $mm -Name 'FeatureSettingsOverrideMask' -Value 3 -PropertyType DWord -Force -EA SilentlyContinue | Out-Null
+      & bcdedit.exe /set nx OptIn 2>$null
+      try { Set-ProcessMitigation -System -Disable CFG -EA SilentlyContinue } catch {}
+      foreach($ac in 'valorant','valorant-win64-shipping','vgc','EasyAntiCheat','FACEIT'){ try { Set-ProcessMitigation -Name "$ac.exe" -Enable CFG -EA SilentlyContinue } catch {} }
+      $dg='HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard'
+      New-Item $dg -Force -EA SilentlyContinue | Out-Null
+      New-ItemProperty -Path $dg -Name 'EnableVirtualizationBasedSecurity' -Value 0 -PropertyType DWord -Force -EA SilentlyContinue | Out-Null
+      Write-Output 'mitigations/VBS disabled (anti-cheat CFG preserved)'
 
   # ===========================================================================
-  # 9. LATENCY PROFILE (radio)
+  # 10. DISK FOOTPRINT (inline DISM; no exeDir)
   # ===========================================================================
-  - !writeStatus: {status: 'Tuning latency'}
+  - !writeStatus: {status: 'Reducing disk footprint'}
   - !powerShell:
-    command: '.\Scripts\OptimizeLatency.ps1 -Profile Balanced'
-    exeDir: true
     wait: true
-    runas: currentUserElevated
-    option: 'LatencyBalanced'
-
+    option: 'GutWinSxS'
+    command: |
+      & dism.exe /Online /Enable-Feature /FeatureName:DirectPlay /All /NoRestart | Out-Null
+      & dism.exe /Online /Remove-Capability /CapabilityName:App.StepsRecorder~~~~0.0.1.0 /NoRestart | Out-Null
+      & dism.exe /Online /Cleanup-Image /StartComponentCleanup | Out-Null
+      if(Test-Path "$env:SystemDrive\Windows.old"){ & takeown /f "$env:SystemDrive\Windows.old" /r /d y | Out-Null; & icacls "$env:SystemDrive\Windows.old" /grant administrators:F /t /c | Out-Null; Remove-Item "$env:SystemDrive\Windows.old" -Recurse -Force -EA SilentlyContinue }
+      Write-Output 'disk cleanup done'
   - !powerShell:
-    command: '.\Scripts\OptimizeLatency.ps1 -Profile Extreme'
-    exeDir: true
     wait: true
-    runas: currentUserElevated
-    option: 'LatencyExtreme'
+    option: 'GutWinSxSResetBase'
+    command: |
+      & dism.exe /Online /Cleanup-Image /StartComponentCleanup /ResetBase | Out-Null
+      Write-Output 'ResetBase done'
 
   # ===========================================================================
-  # 10. DANGER ZONE (off by default in playbook.conf)
+  # 11. DANGER ZONE (off by default)
   # ===========================================================================
-
-  # Defender - soft policy disable (needs Tamper Protection already OFF, else
-  # silently reverted). Not file removal - keeps the box bootable/recoverable.
-  - !registryValue:
-    path: 'HKLM\SOFTWARE\Policies\Microsoft\Windows Defender'
-    value: 'DisableAntiSpyware'
-    data: '1'
-    type: REG_DWORD
-    option: 'DisableDefender'
-  - !registryValue:
-    path: 'HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection'
-    value: 'DisableRealtimeMonitoring'
-    data: '1'
-    type: REG_DWORD
-    option: 'DisableDefender'
-
-  # Windows Update - disable services + block auto-download policy.
+  - !registryValue: {path: 'HKLM\SOFTWARE\Policies\Microsoft\Windows Defender', value: 'DisableAntiSpyware', data: '1', type: REG_DWORD, option: 'DisableDefender'}
+  - !registryValue: {path: 'HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection', value: 'DisableRealtimeMonitoring', data: '1', type: REG_DWORD, option: 'DisableDefender'}
   - !service: {name: 'wuauserv', operation: change, startup: 4, ignoreErrors: true, option: 'DisableWindowsUpdate'}
   - !service: {name: 'UsoSvc', operation: change, startup: 4, ignoreErrors: true, option: 'DisableWindowsUpdate'}
   - !service: {name: 'WaaSMedicSvc', operation: change, startup: 4, ignoreErrors: true, option: 'DisableWindowsUpdate'}
-  - !registryValue:
-    path: 'HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU'
-    value: 'NoAutoUpdate'
-    data: '1'
-    type: REG_DWORD
-    option: 'DisableWindowsUpdate'
+  - !registryValue: {path: 'HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU', value: 'NoAutoUpdate', data: '1', type: REG_DWORD, option: 'DisableWindowsUpdate'}
 
   # ===========================================================================
-  # 11. FINALIZE
+  # 12. FINALIZE
   # ===========================================================================
-  - !powerShell:
-    command: 'reg unload HKU\AME_UserHive_Default'
-    wait: true
+  - !powerShell: {wait: true, command: 'reg unload HKU\AME_UserHive_Default'}
   - !writeStatus: {status: 'Null OS applied - reboot to finish'}

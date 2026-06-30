@@ -53,17 +53,6 @@ if (-not $version) { $version = '0.0.0' }
 $required = @(
     'playbook.conf'
     'Configuration\custom.yml'
-    'Configuration\Telemetry.reg'
-    'Configuration\Privacy.reg'
-    'Configuration\DefaultUser.reg'
-    'Configuration\Services.reg'
-    'Configuration\VisualFX.reg'
-    'Configuration\Network.reg'
-    'Scripts\Backup-Restore.ps1'
-    'Scripts\RemoveBloatware.ps1'
-    'Scripts\OptimizeLatency.ps1'
-    'Scripts\GutWinSxS.ps1'
-    'Scripts\KernelTweaks.ps1'
 )
 $missing = $required | Where-Object { -not (Test-Path $_) }
 if ($missing) { throw "Refusing to build - missing required files:`n  $($missing -join "`n  ")" }
@@ -78,7 +67,7 @@ if (Test-Path $apbx) { Remove-Item $apbx -Force }
 # Explicit allowlist: ONLY the playbook payload is shipped. Anything else in the
 # working tree (docs, local reference material, build tooling) is never packed.
 # -t7z AES-256, -mhe=on encrypts the file listing too, -mx=9 max compression.
-$payload = @('playbook.conf', 'Configuration', 'Scripts')
+$payload = @('playbook.conf', 'Configuration')
 $args = @(
     'a','-t7z',$apbx
 ) + $payload + @(
