@@ -1,0 +1,54 @@
+---
+name: Null OS
+version: '1.0-beta'
+author: Null OS Official
+description: 'The ultimate Windows 11 Pro debloat and performance playbook. Zero telemetry, brutal performance.'
+supportedBuilds:
+  - 22621 # Windows 11 22H2
+  - 22631 # Windows 11 23H2
+  - 26100 # Windows 11 24H2
+  - 27000 # Windows 11 25H2 (Insider/Projected)
+guid: 'a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d'
+details: 'Null OS represents a total overhaul of Windows 11 Pro. It aims to achieve absolute zero telemetry, maximize privacy, and deliver unprecedentedly low latency and high performance.'
+
+title: 'Null OS Configuration'
+shortDescription: 'Enterprise-tier performance and privacy modifications.'
+
+# Basic configuration
+autoReboot: true
+requireNetwork: false
+requireActivation: false
+disableUpdateChecks: true
+
+# The meat of the playbook
+pages:
+  - name: Null_Core
+    title: 'Core Debloat & Telemetry Removal'
+    description: 'Rips out all Windows telemetry, data collection, and unneeded background services.'
+    actions:
+      - type: registry
+        path: Configuration\Telemetry.reg
+        description: 'Disable telemetry via registry.'
+
+      - type: script
+        path: Scripts\RemoveBloatware.ps1
+        description: 'Remove pre-installed Windows UWP apps.'
+        runAs: admin
+        
+  - name: Null_Performance
+    title: 'Brutal Performance Tweaks'
+    description: 'Kernel and service tuning for minimal latency.'
+    actions:
+      - type: script
+        path: Scripts\OptimizeLatency.ps1
+        description: 'Network and input latency tuning.'
+        runAs: admin
+
+  - name: Null_Privacy
+    title: 'Maximum Privacy Lockdown'
+    description: 'Disables all user tracking.'
+    actions:
+      - type: registry
+        path: Configuration\Privacy.reg
+        description: 'Lock down privacy settings.'
+
