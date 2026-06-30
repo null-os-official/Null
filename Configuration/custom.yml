@@ -67,6 +67,16 @@ actions:
   - !scheduledTask: {path: '\Microsoft\Windows\Feedback\Siuf\DmClientOnScenarioDownload', operation: disable, ignoreErrors: true, option: 'Telemetry'}
   - !scheduledTask: {path: '\Microsoft\Windows\Windows Error Reporting\QueueReporting', operation: disable, ignoreErrors: true, option: 'Telemetry'}
 
+  # NVIDIA telemetry (Control Panel opt-out + telemetry service/tasks; driver kept)
+  - !registryValue: {path: 'HKCU\SOFTWARE\NVIDIA Corporation\NVControlPanel2\Client', value: 'OptInOrOutPreference', data: '0', type: REG_DWORD, option: 'Telemetry'}
+  - !service: {name: 'NvTelemetryContainer', operation: change, startup: 4, ignoreErrors: true, option: 'Telemetry'}
+  - !powerShell:
+    wait: true
+    option: 'Telemetry'
+    command: |
+      Get-ScheduledTask -TaskName 'NvTm*','NvProfileUpdater*','NvDriverUpdate*' -EA SilentlyContinue | Disable-ScheduledTask -EA SilentlyContinue | Out-Null
+      Write-Output 'NVIDIA telemetry tasks disabled'
+
   # ===========================================================================
   # 2. PRIVACY (machine + current user)
   # ===========================================================================
@@ -108,6 +118,11 @@ actions:
   - !registryValue: {path: 'HKU\AME_UserHive_Default\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager', value: 'SilentInstalledAppsEnabled', data: '0', type: REG_DWORD, option: 'Privacy'}
   - !registryValue: {path: 'HKU\AME_UserHive_Default\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager', value: 'SubscribedContentEnabled', data: '0', type: REG_DWORD, option: 'Privacy'}
   - !registryValue: {path: 'HKU\AME_UserHive_Default\SOFTWARE\Microsoft\Windows\CurrentVersion\Search', value: 'BingSearchEnabled', data: '0', type: REG_DWORD, option: 'Privacy'}
+  # -- Recall / Copilot / dynamic lighting --
+  - !registryValue: {path: 'HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsAI', value: 'DisableAIDataAnalysis', data: '1', type: REG_DWORD, option: 'Privacy'}
+  - !registryValue: {path: 'HKCU\SOFTWARE\Policies\Microsoft\Windows\WindowsAI', value: 'DisableAIDataAnalysis', data: '1', type: REG_DWORD, option: 'Privacy'}
+  - !registryValue: {path: 'HKCU\SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot', value: 'TurnOffWindowsCopilot', data: '1', type: REG_DWORD, option: 'Privacy'}
+  - !registryValue: {path: 'HKCU\SOFTWARE\Microsoft\Lighting', value: 'AmbientLightingEnabled', data: '0', type: REG_DWORD, option: 'Privacy'}
 
   # ===========================================================================
   # 3. NETWORK HARDENING + STACK TUNING
@@ -170,6 +185,15 @@ actions:
   - !service: {name: 'fhsvc', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
   - !service: {name: 'wbengine', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
   - !service: {name: 'autotimesvc', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'NetBT', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'GpuEnergyDrv', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'DoSvc', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'WpnService', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'OneSyncSvc', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'MessagingService', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'CDPSvc', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'DusmSvc', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
+  - !service: {name: 'dmwappushservice', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
 
   # ===========================================================================
   # 5. VISUAL EFFECTS (animations/transparency off; ClearType + DWM kept)
@@ -220,6 +244,23 @@ actions:
   - !appx: {name: 'Microsoft.XboxGameOverlay*', type: family, option: '!KeepXbox'}
   - !appx: {name: 'Microsoft.XboxSpeechToTextOverlay*', type: family, option: '!KeepXbox'}
   - !appx: {name: 'Microsoft.GamingApp*', type: family, option: '!KeepXbox'}
+
+  # Edge background + updater (Edge itself kept; kills EdgeWebView2 boost + updater procs)
+  - !registryValue: {path: 'HKLM\SOFTWARE\Policies\Microsoft\Edge', value: 'BackgroundModeEnabled', data: '0', type: REG_DWORD, option: 'Debloat'}
+  - !registryValue: {path: 'HKLM\SOFTWARE\Policies\Microsoft\Edge', value: 'StartupBoostEnabled', data: '0', type: REG_DWORD, option: 'Debloat'}
+  - !service: {name: 'edgeupdate', operation: change, startup: 4, ignoreErrors: true, option: 'Debloat'}
+  - !service: {name: 'edgeupdatem', operation: change, startup: 4, ignoreErrors: true, option: 'Debloat'}
+  - !scheduledTask: {path: '\MicrosoftEdgeUpdateTaskMachineCore', operation: disable, ignoreErrors: true, option: 'Debloat'}
+  - !scheduledTask: {path: '\MicrosoftEdgeUpdateTaskMachineUA', operation: disable, ignoreErrors: true, option: 'Debloat'}
+  # Widgets - kills the WebView2-backed Widgets.exe (big RAM)
+  - !registryValue: {path: 'HKLM\SOFTWARE\Policies\Microsoft\Dsh', value: 'AllowNewsAndInterests', data: '0', type: REG_DWORD, option: 'Debloat'}
+  - !registryValue: {path: 'HKLM\SOFTWARE\Policies\Microsoft\Windows\Windows Feeds', value: 'EnableFeeds', data: '0', type: REG_DWORD, option: 'Debloat'}
+  # Game Bar / GameDVR background capture off (Game Pass apps kept)
+  - !registryValue: {path: 'HKLM\SOFTWARE\Policies\Microsoft\Windows\GameDVR', value: 'AllowGameDVR', data: '0', type: REG_DWORD, option: 'Debloat'}
+  - !registryValue: {path: 'HKCU\System\GameConfigStore', value: 'GameDVR_Enabled', data: '0', type: REG_DWORD, option: 'Debloat'}
+  - !registryValue: {path: 'HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\GameDVR', value: 'AppCaptureEnabled', data: '0', type: REG_DWORD, option: 'Debloat'}
+  - !registryValue: {path: 'HKLM\SOFTWARE\Microsoft\WindowsRuntime\ActivatableClassId\Windows.Gaming.GameBar.PresenceServer.Internal.PresenceWriter', value: 'ActivationType', data: '0', type: REG_DWORD, option: 'Debloat'}
+  - !registryValue: {path: 'HKCU\SOFTWARE\Microsoft\GameBar', value: 'ShowStartupPanel', data: '0', type: REG_DWORD, option: 'Debloat'}
 
   # ===========================================================================
   # 7. HARDWARE SERVICE TOGGLES (inverse-gated)
@@ -307,6 +348,20 @@ actions:
       Write-Output 'mitigations/VBS disabled (anti-cheat CFG preserved)'
 
   # ===========================================================================
+  # 9b. CORE ISOLATION / VBS + RAM COMPRESSION (opt-in, RAM/CPU wins)
+  # ===========================================================================
+  - !registryValue: {path: 'HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard', value: 'EnableVirtualizationBasedSecurity', data: '0', type: REG_DWORD, option: 'DisableVBS'}
+  - !registryValue: {path: 'HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity', value: 'Enabled', data: '0', type: REG_DWORD, option: 'DisableVBS'}
+  - !registryValue: {path: 'HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\CredentialGuard', value: 'Enabled', data: '0', type: REG_DWORD, option: 'DisableVBS'}
+  - !registryValue: {path: 'HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\KernelShadowStacks', value: 'Enabled', data: '0', type: REG_DWORD, option: 'DisableVBS'}
+  - !registryValue: {path: 'HKLM\SYSTEM\CurrentControlSet\Control\Lsa', value: 'RunAsPPL', data: '0', type: REG_DWORD, option: 'DisableVBS'}
+  - !powerShell:
+    wait: true
+    option: 'DisableMemoryCompression'
+    command: |
+      try { Disable-MMAgent -MemoryCompression -ErrorAction Stop; Write-Output 'RAM compression disabled' } catch { Write-Output "mem compression: $($_.Exception.Message)" }
+
+  # ===========================================================================
   # 10. DISK FOOTPRINT (inline DISM; no exeDir)
   # ===========================================================================
   - !writeStatus: {status: 'Reducing disk footprint'}
@@ -314,7 +369,6 @@ actions:
     wait: true
     option: 'GutWinSxS'
     command: |
-      & dism.exe /Online /Enable-Feature /FeatureName:DirectPlay /All /NoRestart | Out-Null
       & dism.exe /Online /Remove-Capability /CapabilityName:App.StepsRecorder~~~~0.0.1.0 /NoRestart | Out-Null
       & dism.exe /Online /Cleanup-Image /StartComponentCleanup | Out-Null
       if(Test-Path "$env:SystemDrive\Windows.old"){ & takeown /f "$env:SystemDrive\Windows.old" /r /d y | Out-Null; & icacls "$env:SystemDrive\Windows.old" /grant administrators:F /t /c | Out-Null; Remove-Item "$env:SystemDrive\Windows.old" -Recurse -Force -EA SilentlyContinue }
