@@ -1,0 +1,78 @@
+Windows Registry Editor Version 5.00
+
+; Null OS - Telemetry & diagnostics removal
+; Machine-wide policies. ASCII only so reg.exe imports cleanly via Configuration\main.yml.
+; Does NOT touch the WSearch service or any user-facing search surface.
+
+; --- Connected User Experiences and Telemetry (DiagTrack) data level ---
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\DataCollection]
+"AllowTelemetry"=dword:00000000
+"MaxTelemetryAllowed"=dword:00000000
+"DoNotShowFeedbackNotifications"=dword:00000001
+"AllowDeviceNameInTelemetry"=dword:00000000
+"AllowCommercialDataPipeline"=dword:00000000
+"AllowDesktopAnalyticsProcessing"=dword:00000000
+"AllowUpdateComplianceProcessing"=dword:00000000
+"AllowWUfBCloudProcessing"=dword:00000000
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\DataCollection]
+"AllowTelemetry"=dword:00000000
+
+; --- Stop the DiagTrack ETW autologger from starting at boot ---
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\WMI\Autologger\AutoLogger-Diagtrack-Listener]
+"Start"=dword:00000000
+
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\WMI\Autologger\Diagtrack-Listener]
+"Start"=dword:00000000
+
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\WMI\Autologger\SQMLogger]
+"Start"=dword:00000000
+
+; --- Customer Experience Improvement Program ---
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\SQMClient\Windows]
+"CEIPEnable"=dword:00000000
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\SQMClient\Windows]
+"CEIPEnable"=dword:00000000
+
+; --- Application Compatibility telemetry / inventory ---
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\AppCompat]
+"AITEnable"=dword:00000000
+"DisableInventory"=dword:00000001
+"DisableUAR"=dword:00000001
+"DisablePCA"=dword:00000001
+
+; --- Windows Error Reporting ---
+[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\Windows Error Reporting]
+"Disabled"=dword:00000001
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\Windows Error Reporting]
+"Disabled"=dword:00000001
+
+; --- Handwriting / input error reports ---
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\TabletPC]
+"PreventHandwritingDataSharing"=dword:00000001
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\HandwritingErrorReports]
+"PreventHandwritingErrorReports"=dword:00000001
+
+; --- KMS / activation telemetry, device metadata retrieval ---
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\Device Metadata]
+"PreventDeviceMetadataFromNetwork"=dword:00000001
+
+; --- OneSettings / cloud telemetry config download ---
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\DataCollection]
+"DisableOneSettingsDownloads"=dword:00000001
+"DisableEnterpriseAuthProxy"=dword:00000001
+
+; --- Edge telemetry / metrics ---
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Edge]
+"MetricsReportingEnabled"=dword:00000000
+"DiagnosticData"=dword:00000000
+"UserFeedbackAllowed"=dword:00000000
+"PersonalizationReportingEnabled"=dword:00000000
+"SpotlightExperiencesAndRecommendationsEnabled"=dword:00000000
+
+; --- Feedback hub / SIUF prompts ---
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\DataCollection]
+"DoNotShowFeedbackNotifications"=dword:00000001

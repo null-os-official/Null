@@ -1,0 +1,9 @@
+# Build artifacts - regenerate with build.ps1, distribute via GitHub Releases
+dist/
+release/
+
+# Local tooling (bundled 7-Zip etc.)
+tools/
+
+# Memory / doc backups
+*.original.md
