@@ -1,0 +1,28 @@
+Windows Registry Editor Version 5.00
+
+; Null OS - network hardening + stack tuning (machine-wide).
+; Per-interface Nagle / delayed-ACK tuning lives in OptimizeLatency.ps1.
+
+; --- LLMNR off (legacy, spoofable; DNS replaces it) ---
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient]
+"EnableMulticast"=dword:00000000
+
+; --- SMB: block null-session access, kill bandwidth throttling ---
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters]
+"RestrictNullSessAccess"=dword:00000001
+
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters]
+"DisableBandwidthThrottling"=dword:00000001
+"FileInfoCacheEntriesMax"=dword:00000400
+"DirectoryCacheEntriesMax"=dword:00000400
+"FileNotFoundCacheEntriesMax"=dword:00000400
+
+; --- Block anonymous enumeration of accounts and shares ---
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Lsa]
+"RestrictAnonymous"=dword:00000001
+"RestrictAnonymousSAM"=dword:00000001
+
+; --- Remote Assistance off (unused attack surface) ---
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Remote Assistance]
+"fAllowFullControl"=dword:00000000
+"fAllowToGetHelp"=dword:00000000

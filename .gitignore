@@ -5,5 +5,8 @@ release/
 # Local tooling (bundled 7-Zip etc.)
 tools/
 
+# Third-party reference repo (AtlasOS) - analyzed locally, never shipped/committed
+Atlas-main/
+
 # Memory / doc backups
 *.original.md

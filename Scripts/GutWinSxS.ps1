@@ -30,6 +30,11 @@ function Invoke-Dism {
 
 Write-Output "Null OS WinSxS gut - mode: $Mode"
 
+# Ensure DirectPlay is present - many older / indie games still depend on it.
+Invoke-Dism @('/Online','/Enable-Feature','/FeatureName:DirectPlay','/All','/NoRestart')
+# Drop deprecated, unused capabilities.
+Invoke-Dism @('/Online','/Remove-Capability','/CapabilityName:App.StepsRecorder~~~~0.0.1.0','/NoRestart')
+
 # Log current store size for before/after comparison.
 Invoke-Dism @('/Online','/Cleanup-Image','/AnalyzeComponentStore')
 

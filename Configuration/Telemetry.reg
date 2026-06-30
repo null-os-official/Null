@@ -65,6 +65,15 @@ Windows Registry Editor Version 5.00
 "DisableOneSettingsDownloads"=dword:00000001
 "DisableEnterpriseAuthProxy"=dword:00000001
 
+; --- EventTranscript (DiagTrack SQLite event store) ---
+[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Diagnostics\DiagTrack\EventTranscriptKey]
+"EnableEventTranscript"=dword:00000000
+"MiniTraceSlotEnabled"=dword:00000000
+
+; --- 32-bit policy mirror ---
+[HKEY_LOCAL_MACHINE\SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Policies\DataCollection]
+"AllowTelemetry"=dword:00000000
+
 ; --- Edge telemetry / metrics ---
 [HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Edge]
 "MetricsReportingEnabled"=dword:00000000

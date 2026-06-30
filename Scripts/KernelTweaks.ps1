@@ -63,10 +63,28 @@ Set-Reg 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\kernel' 'GlobalT
 # === Optional: speculative-execution mitigations + VBS off (gaming) =========
 if ($DisableMitigations) {
     Write-Output "WARNING: disabling CPU mitigations and VBS/HVCI - reduces security."
+
+    # Spectre / Meltdown speculative-execution mitigations off.
     $mm = 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management'
-    Set-Reg $mm 'FeatureSettingsOverride' 1
+    Set-Reg $mm 'FeatureSettingsOverride' 3
     Set-Reg $mm 'FeatureSettingsOverrideMask' 3
 
+    # SEHOP (exception chain validation) off.
+    Set-Reg 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\kernel' 'DisableExceptionChainValidation' 1
+    # Object-manager hardening off.
+    Set-Reg 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' 'ProtectionMode' 0
+    # DEP for OS components only.
+    & bcdedit.exe /set nx OptIn 2>$null
+
+    # System-wide process mitigations (CFG, etc.) off.
+    try { Set-ProcessMitigation -System -Disable CFG -ErrorAction SilentlyContinue } catch {}
+    # Re-enable CFG for anti-cheat engines that REQUIRE it, so competitive games
+    # still launch with mitigations otherwise disabled.
+    foreach ($ac in 'valorant','valorant-win64-shipping','vgtray','vgc','FACEIT','EasyAntiCheat') {
+        try { Set-ProcessMitigation -Name "$ac.exe" -Enable CFG -ErrorAction SilentlyContinue } catch {}
+    }
+
+    # Virtualization-Based Security / HVCI off (large gaming gain).
     $dg = 'HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard'
     Set-Reg $dg 'EnableVirtualizationBasedSecurity' 0
     Set-Reg "$dg\Scenarios\HypervisorEnforcedCodeIntegrity" 'Enabled' 0

@@ -52,11 +52,13 @@ if (-not $version) { $version = '0.0.0' }
 # --- Verify the required payload exists (guard against orphaned builds) -----
 $required = @(
     'playbook.conf'
-    'Configuration\main.yml'
+    'Configuration\custom.yml'
     'Configuration\Telemetry.reg'
     'Configuration\Privacy.reg'
+    'Configuration\DefaultUser.reg'
     'Configuration\Services.reg'
     'Configuration\VisualFX.reg'
+    'Configuration\Network.reg'
     'Scripts\Backup-Restore.ps1'
     'Scripts\RemoveBloatware.ps1'
     'Scripts\OptimizeLatency.ps1'
@@ -72,25 +74,16 @@ if (-not (Test-Path $OutDir)) { New-Item -ItemType Directory -Path $OutDir -Forc
 $apbx = Join-Path $OutDir "NullOS-$version.apbx"
 if (Test-Path $apbx) { Remove-Item $apbx -Force }
 
-# --- Things that must NEVER go in the shipped playbook ----------------------
-$exclude = @(
-    '-xr!.git'
-    '-xr!.github'
-    '-xr!docs'
-    '-xr!dist'
-    '-xr!release'
-    '-xr!tools'
-    '-x!build.ps1'
-    '-x!README.md'
-    '-xr!*.original.md'
-)
-
 # --- Pack ------------------------------------------------------------------
+# Explicit allowlist: ONLY the playbook payload is shipped. Anything else in the
+# working tree (docs, local reference material, build tooling) is never packed.
 # -t7z AES-256, -mhe=on encrypts the file listing too, -mx=9 max compression.
+$payload = @('playbook.conf', 'Configuration', 'Scripts')
 $args = @(
-    'a','-t7z',$apbx,'*',
+    'a','-t7z',$apbx
+) + $payload + @(
     "-p$Password",'-mhe=on','-mx=9','-bso0','-bsp0'
-) + $exclude
+)
 
 Write-Host "[*] Packing -> $apbx"
 & $sevenZip @args

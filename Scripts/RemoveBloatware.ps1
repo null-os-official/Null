@@ -127,6 +127,11 @@ foreach ($target in $Remove) {
         if (Test-Keep $p.Name) { continue }
         try {
             Remove-AppxPackage -Package $p.PackageFullName -AllUsers -ErrorAction Stop
+            # Prevent reinstall on new profiles / updates (deprovision).
+            if ($p.PackageFamilyName) {
+                New-Item -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Appx\AppxAllUserStore\Deprovisioned' `
+                    -Name $p.PackageFamilyName -Force -ErrorAction SilentlyContinue | Out-Null
+            }
             Write-Output "removed pkg : $($p.Name)"
             $removedCount++
         } catch {
