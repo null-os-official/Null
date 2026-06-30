@@ -67,15 +67,26 @@ actions:
   - !scheduledTask: {path: '\Microsoft\Windows\Feedback\Siuf\DmClientOnScenarioDownload', operation: disable, ignoreErrors: true, option: 'Telemetry'}
   - !scheduledTask: {path: '\Microsoft\Windows\Windows Error Reporting\QueueReporting', operation: disable, ignoreErrors: true, option: 'Telemetry'}
 
-  # NVIDIA telemetry (Control Panel opt-out + telemetry service/tasks; driver kept)
+  # NVIDIA: kill background/telemetry/update workers; KEEP the display container.
+  # NvContainerLocalSystem drives Optimus/display switching - disabling it can
+  # black-screen a hybrid-graphics laptop, so it is deliberately preserved.
   - !registryValue: {path: 'HKCU\SOFTWARE\NVIDIA Corporation\NVControlPanel2\Client', value: 'OptInOrOutPreference', data: '0', type: REG_DWORD, option: 'Telemetry'}
   - !service: {name: 'NvTelemetryContainer', operation: change, startup: 4, ignoreErrors: true, option: 'Telemetry'}
+  - !service: {name: 'NvContainerNetworkService', operation: change, startup: 4, ignoreErrors: true, option: 'Telemetry'}
   - !powerShell:
     wait: true
     option: 'Telemetry'
     command: |
-      Get-ScheduledTask -TaskName 'NvTm*','NvProfileUpdater*','NvDriverUpdate*' -EA SilentlyContinue | Disable-ScheduledTask -EA SilentlyContinue | Out-Null
-      Write-Output 'NVIDIA telemetry tasks disabled'
+      # Disable NVIDIA App / GeForce Experience background + updater + telemetry tasks (app stays installed)
+      Get-ScheduledTask -EA SilentlyContinue | Where-Object {
+        $_.TaskName -match 'NvTm|NvProfileUpdater|NvDriverUpdate|NvBackend|NvNode|GFE|GeForce'
+      } | Disable-ScheduledTask -EA SilentlyContinue | Out-Null
+      # Global first-time-setup / telemetry opt-out flags (do not uninstall the app)
+      New-Item -Path 'HKLM:\SOFTWARE\NVIDIA Corporation\Global\FTS' -Force -EA SilentlyContinue | Out-Null
+      New-ItemProperty -Path 'HKLM:\SOFTWARE\NVIDIA Corporation\Global\FTS' -Name 'EnableRID44231' -Value 0 -PropertyType DWord -Force -EA SilentlyContinue | Out-Null
+      New-ItemProperty -Path 'HKLM:\SOFTWARE\NVIDIA Corporation\Global\FTS' -Name 'EnableRID64640' -Value 0 -PropertyType DWord -Force -EA SilentlyContinue | Out-Null
+      New-ItemProperty -Path 'HKLM:\SOFTWARE\NVIDIA Corporation\Global\FTS' -Name 'EnableRID66610' -Value 0 -PropertyType DWord -Force -EA SilentlyContinue | Out-Null
+      Write-Output 'NVIDIA background/telemetry/updater tamed; display container kept'
 
   # ===========================================================================
   # 2. PRIVACY (machine + current user)
@@ -196,6 +207,20 @@ actions:
   - !service: {name: 'dmwappushservice', operation: change, startup: 4, ignoreErrors: true, option: 'ServiceCull'}
 
   # ===========================================================================
+  # 4b. FORCE SERVICE-HOST GROUPING (single biggest idle-process-count lever)
+  # On >3.5GB RAM Windows splits every service into its own svchost.exe. Raising
+  # the split threshold above installed RAM collapses them back into shared
+  # hosts - drops 15-25 idle processes on a 16GB machine. Takes effect on reboot.
+  # ===========================================================================
+  - !writeStatus: {status: 'Forcing service-host grouping (cuts idle process count)'}
+  - !powerShell:
+    wait: true
+    option: 'ForceSvcGrouping'
+    command: |
+      & reg add 'HKLM\SYSTEM\CurrentControlSet\Control' /v SvcHostSplitThresholdInKB /t REG_DWORD /d 0xffffffff /f | Out-Null
+      Write-Output 'svchost split threshold raised - services group on next boot'
+
+  # ===========================================================================
   # 5. VISUAL EFFECTS (animations/transparency off; ClearType + DWM kept)
   # ===========================================================================
   - !writeStatus: {status: 'Trimming visual effects'}
@@ -239,6 +264,9 @@ actions:
   - !appx: {name: 'MicrosoftCorporationII.MicrosoftFamily*', type: family, option: 'Debloat'}
   - !appx: {name: 'Microsoft.ZuneVideo*', type: family, option: 'Debloat'}
   - !appx: {name: 'Microsoft.ZuneMusic*', type: family, option: 'Debloat'}
+  - !appx: {name: 'Disney.37853FC22B2CE*', type: family, option: 'Debloat'}
+  - !appx: {name: 'SpotifyAB.SpotifyMusic*', type: family, option: 'Debloat'}
+  - !appx: {name: 'Microsoft.MicrosoftJournal*', type: family, option: 'Debloat'}
   # Xbox UWP only if "Keep Xbox" is unchecked (GamingServices always kept).
   - !appx: {name: 'Microsoft.XboxGamingOverlay*', type: family, option: '!KeepXbox'}
   - !appx: {name: 'Microsoft.XboxGameOverlay*', type: family, option: '!KeepXbox'}
@@ -252,6 +280,34 @@ actions:
   - !service: {name: 'edgeupdatem', operation: change, startup: 4, ignoreErrors: true, option: 'Debloat'}
   - !scheduledTask: {path: '\MicrosoftEdgeUpdateTaskMachineCore', operation: disable, ignoreErrors: true, option: 'Debloat'}
   - !scheduledTask: {path: '\MicrosoftEdgeUpdateTaskMachineUA', operation: disable, ignoreErrors: true, option: 'Debloat'}
+  # Full Edge browser removal (gated separately). WebView2 runtime is preserved so
+  # WebView2-dependent apps keep working. Best-effort: Microsoft's region lock can
+  # block the uninstaller on some builds - in that case the background/updater are
+  # still fully neutralized above, and reinstall is blocked below.
+  - !service: {name: 'edgeupdate', operation: change, startup: 4, ignoreErrors: true, option: 'RemoveEdge'}
+  - !service: {name: 'edgeupdatem', operation: change, startup: 4, ignoreErrors: true, option: 'RemoveEdge'}
+  - !powerShell:
+    wait: true
+    option: 'RemoveEdge'
+    command: |
+      # Temporarily allow uninstall (region policy override) then run Edge's own uninstaller system-level
+      $reg = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\IntegratedServicesRegionPolicySet'
+      try { New-Item $reg -Force -EA SilentlyContinue | Out-Null; New-ItemProperty -Path $reg -Name 'Microsoft.WindowsLegacyEdge' -Value 1 -PropertyType DWord -Force -EA SilentlyContinue | Out-Null } catch {}
+      New-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\EdgeUpdate' -Name 'DoNotUpdateToEdgeWithChromium' -Value 1 -PropertyType DWord -Force -EA SilentlyContinue | Out-Null
+      $setup = Get-ChildItem `
+        "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\*\Installer\setup.exe", `
+        "$env:ProgramFiles\Microsoft\Edge\Application\*\Installer\setup.exe" -EA SilentlyContinue |
+        Sort-Object FullName -Descending | Select-Object -First 1
+      if ($setup) {
+        Start-Process -FilePath $setup.FullName -ArgumentList '--uninstall --system-level --verbose-logging --force-uninstall' -Wait -EA SilentlyContinue
+        Write-Output "Edge uninstaller invoked: $($setup.FullName)"
+      } else { Write-Output 'Edge setup.exe not found (already removed)' }
+      # Deprovision the UWP stub + block reinstall (leave *WebView2* packages alone)
+      Get-AppxPackage -AllUsers 'Microsoft.MicrosoftEdge.Stable*' | Remove-AppxPackage -EA SilentlyContinue
+      foreach ($k in 'Microsoft.MicrosoftEdge.Stable_8wekyb3d8bbwe','Microsoft.MicrosoftEdge_8wekyb3d8bbwe') {
+        New-Item -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Appx\AppxAllUserStore\Deprovisioned\$k" -Force -EA SilentlyContinue | Out-Null
+      }
+      Write-Output 'Edge removal complete (WebView2 runtime preserved)'
   # Widgets - kills the WebView2-backed Widgets.exe (big RAM)
   - !registryValue: {path: 'HKLM\SOFTWARE\Policies\Microsoft\Dsh', value: 'AllowNewsAndInterests', data: '0', type: REG_DWORD, option: 'Debloat'}
   - !registryValue: {path: 'HKLM\SOFTWARE\Policies\Microsoft\Windows\Windows Feeds', value: 'EnableFeeds', data: '0', type: REG_DWORD, option: 'Debloat'}
@@ -269,6 +325,38 @@ actions:
   - !service: {name: 'BTAGService', operation: change, startup: 4, ignoreErrors: true, option: '!KeepBluetooth'}
   - !service: {name: 'Spooler', operation: change, startup: 4, ignoreErrors: true, option: '!KeepPrintSpooler'}
   - !service: {name: 'PrintNotify', operation: change, startup: 4, ignoreErrors: true, option: '!KeepPrintSpooler'}
+
+  # ===========================================================================
+  # 7b. OEM (LENOVO) TRIM - telemetry/updater/marketing only
+  # Explicit keep-list protects the hardware interface + thermal/power backend so
+  # Fn+Q performance modes, fan control, and battery conservation still work.
+  # ===========================================================================
+  - !writeStatus: {status: 'Trimming Lenovo OEM telemetry and bloat'}
+  - !appx: {name: 'E0469640.LenovoUtility*', type: family, option: 'OEMDebloat'}
+  - !appx: {name: 'E046963F.LenovoSettingsforEnterprise*', type: family, option: 'OEMDebloat'}
+  - !appx: {name: 'LenovoCorporation.LenovoID*', type: family, option: 'OEMDebloat'}
+  - !appx: {name: '*LenovoNow*', type: family, option: 'OEMDebloat'}
+  - !appx: {name: '*AppExplorer*', type: family, option: 'OEMDebloat'}
+  - !powerShell:
+    wait: true
+    option: 'OEMDebloat'
+    command: |
+      # KEEP-LIST: hardware interface + Vantage thermal/power backend must survive.
+      $keep = 'ImControllerService','LenovoVantageService','LenovoVantage'
+      # Disable Lenovo telemetry/updater/marketing scheduled tasks (battery/thermal tasks untouched)
+      Get-ScheduledTask -EA SilentlyContinue | Where-Object {
+        $_.TaskPath -like '*Lenovo*' -and $_.TaskName -match 'Telemetry|Update|Feed|Analytics|Marketing|AppDirector|SmartEngine|Now|Companion'
+      } | Disable-ScheduledTask -EA SilentlyContinue | Out-Null
+      # Disable Lenovo updater/telemetry/marketing services, never the keep-list
+      Get-Service -EA SilentlyContinue | Where-Object {
+        ($_.Name -match 'Lenovo|LnvData|SUService|SmartEngine|TabletInputService') -and
+        ($keep -notcontains $_.Name) -and
+        ($_.Name -match 'Update|Telemetry|Data|SmartEngine|Now|Analytics|SUService|Marketing')
+      } | ForEach-Object {
+        Set-Service -Name $_.Name -StartupType Disabled -EA SilentlyContinue
+        Stop-Service -Name $_.Name -Force -EA SilentlyContinue
+      }
+      Write-Output 'Lenovo telemetry/updater/marketing trimmed; ImController + Vantage thermal kept'
 
   # ===========================================================================
   # 8. PERFORMANCE / LATENCY ENGINE (inline; no exeDir)
@@ -379,6 +467,32 @@ actions:
     command: |
       & dism.exe /Online /Cleanup-Image /StartComponentCleanup /ResetBase | Out-Null
       Write-Output 'ResetBase done'
+
+  # ===========================================================================
+  # 10c. UPDATE PINNING (block latency-breaking updates without killing security)
+  # Defers feature updates 365d and quality updates 4d, and pins the current
+  # release so a feature update can't silently swap your build. Security patches
+  # still arrive (just not day-one buggy). Combined with the restore point at the
+  # top, this is the safe alternative to fully disabling Windows Update.
+  # ===========================================================================
+  - !writeStatus: {status: 'Pinning Windows build against bad updates'}
+  - !powerShell:
+    wait: true
+    option: 'PinWindowsBuild'
+    command: |
+      $wu = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate'
+      function S($n,$v,$t='DWord'){ if(-not(Test-Path $wu)){New-Item $wu -Force|Out-Null}; New-ItemProperty -Path $wu -Name $n -Value $v -PropertyType $t -Force -EA SilentlyContinue|Out-Null }
+      S 'DeferFeatureUpdates' 1
+      S 'DeferFeatureUpdatesPeriodInDays' 365
+      S 'DeferQualityUpdates' 1
+      S 'DeferQualityUpdatesPeriodInDays' 4
+      $rel = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -EA SilentlyContinue).DisplayVersion
+      if ($rel) {
+        S 'TargetReleaseVersion' 1
+        S 'TargetReleaseVersionInfo' $rel 'String'
+        S 'ProductVersion' 'Windows 11' 'String'
+      }
+      Write-Output "Build pinned to $rel; quality +4d, feature +365d"
 
   # ===========================================================================
   # 11. DANGER ZONE (off by default)
