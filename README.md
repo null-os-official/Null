@@ -1,26 +1,73 @@
 # Null OS
 
-Welcome to the official Null OS repository. This project isn't just another debloat script or light OS spin. It's a complete teardown and rebuild of Windows 11 Pro, explicitly designed to strip out everything you don't need and leave behind an operating system that delivers absolute, uncompromised performance. 
+Null OS isn't another debloat script. It's a highly opinionated, brutally
+optimized configuration for **Windows 11 Pro**, applied cleanly through **AME
+Wizard Beta** as a single `.apbx` playbook. It strips telemetry, culls
+background workers, tames OEM/GPU bloat surgically, and tunes the latency path —
+while staying **fully reversible**.
 
-We use the AME Wizard beta to execute these modifications cleanly and reliably. The result is a `.apbx` playbook that completely transforms stock Windows 11 Pro into what we believe is the best OS of all time.
+## What Null OS does
+- **Zero telemetry** — DiagTrack, CEIP, Appraiser, error reporting, AppCompat
+  inventory, and the telemetry scheduled tasks/autologgers are shut off.
+- **Maximum privacy** — advertising ID, location, activity history, Cortana,
+  Bing/web search, tailored experiences, Recall/Copilot AI data — locked down at
+  machine, current-user, and new-user levels.
+- **Brutal performance** — ~50 non-essential services culled, service-host
+  grouping forced to collapse idle `svchost.exe` processes, background apps and
+  capture disabled, visual effects trimmed (ClearType + tear-free DWM kept).
+- **Minimal latency** — Win32PrioritySeparation, MMCSS gaming profile, network
+  throttling off, per-NIC TCP tuning, kernel/boot timer path tuned, optional
+  extreme low-latency power scheme.
+- **Surgical, not scorched-earth** — Lenovo and NVIDIA telemetry/updaters are
+  removed while thermal/fan control, Fn keys, and Optimus display switching are
+  kept. Gaming dependencies and the WebView2 runtime survive.
 
-## What is Null OS?
-- **Zero Telemetry**: If it calls home, it's gone. We rip out all data collection and tracking vectors baked into Windows.
-- **Maximum Privacy**: Total lockdown. No background telemetry tasks, no Microsoft account enforcement, no cloud synchronization unless you explicitly ask for it.
-- **Brutal Performance**: The core focus. By gutting unnecessary services, background processes, and bloatware, we free up CPU cycles and RAM.
-- **Minimal Latency**: Tuned for gamers and power users. We strip away the latency-inducing layers that stock Windows ships with, resulting in a significantly more responsive experience.
+## Reversible by design
+Before touching anything, Null OS takes a **System Restore point** *and* **raw
+registry + BCD backups** to `%SystemDrive%\NullOS-Backup`. Security-reducing
+options (Defender, Windows Update, CPU mitigations, VBS) are **opt-in and off by
+default**. Instead of killing Windows Update, the default is to **pin the build**
+and defer updates — you keep security patches, you lose day-one breakage.
 
-## The Approach
-Unlike Atlas OS or ReviOS, Null OS aims for an enterprise-tier standard of engineering. Every registry tweak, every script, and every configuration is documented, tested, and built with intention. We analyze the AME playbook structure and generate the absolute optimal configurations.
+Neither Atlas OS nor Revi OS takes a raw reg/BCD backup. That's the point.
 
-We want Null OS to be the gold standard. 
+## Proof, not marketing
+Every performance claim ships with a receipt. The [`bench/`](bench/) harness
+captures idle process count, RAM in use, boot time, DPC latency, and appx/service
+counts on a clean VM **before and after** apply, then diffs them:
 
-## Getting Started
-(Documentation in progress - wait for the official beta release of the playbook)
+```powershell
+.\bench\Measure-Baseline.ps1 -Profile clean-vm -Label before
+# apply playbook, reboot, settle
+.\bench\Measure-Baseline.ps1 -Profile clean-vm -Label after -SettleSeconds 120
+.\bench\Measure-Baseline.ps1 -Compare .\bench\reports\<before>.json,.\bench\reports\<after>.json
+```
 
-1. Grab the latest AME Wizard beta.
-2. Download the Null OS `.apbx` playbook from our releases.
-3. Drag, drop, and let it transform your system.
+Idle RAM is shell-bound (explorer/dwm/SearchHost are unremovable), so the honest
+metric is **delta vs clean Windows**, not a fixed absolute. Numbers without a
+committed report in `bench/reports/` are not published. Verified baselines land
+here as the clean-VM proof loop matures.
+
+## Approach vs Atlas OS / Revi OS
+Atlas maximizes aggression; Revi maximizes post-install control. Null OS aims to
+be the only playbook that is **brutal AND reversible AND provable AND
+hardware-aware** — enterprise-tier engineering where every tweak is documented,
+gated behind a toggle, and undoable.
+
+## Getting started
+1. Grab the latest **AME Wizard Beta**.
+2. Download the Null OS `.apbx` from [Releases](https://github.com/null-os-official/Null/releases).
+3. Drag, drop, pick your toggles, apply. Reboot to finish.
+
+> Building from source: `.\build.ps1` → `dist\NullOS-<version>.apbx`
+> (requires a 7-Zip CLI on PATH or in `.\tools\`).
+
+## Documentation
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — execution model, safety, and
+  the full module breakdown (matches `Configuration/custom.yml` line-for-line).
+- [`bench/README.md`](bench/README.md) — the baseline harness.
 
 ## Contributing
-We're building the ultimate OS. If you know Windows internals, networking stacks, or kernel-level optimization, check out our Architecture docs and submit a PR.
+Know Windows internals, networking stacks, or kernel tuning? Read the
+architecture doc. Every change must be justified by a measurable win in the
+`bench/` harness or an explicit privacy gain — and it must be reversible.

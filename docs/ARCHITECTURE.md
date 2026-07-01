@@ -1,32 +1,121 @@
 # Null OS Architecture
 
-The philosophy behind Null OS is straightforward: modern operating systems are weighed down by unnecessary features, telemetry, and background services that benefit the vendor, not the user. Null OS exists to reverse this. It is a highly opinionated, brutally optimized configuration for Windows 11 Pro, executed via AME Wizard.
+Modern Windows is weighed down by telemetry, background workers, and services
+that benefit the vendor, not the user. Null OS reverses that: a highly
+opinionated, brutally optimized configuration for Windows 11 Pro, applied via
+**AME Wizard Beta**. Everything here describes what the shipping playbook
+actually does — no aspirational claims. If it's documented, it's in
+`Configuration/custom.yml`.
 
-## Design Pillars
+## Execution Model (how it really runs)
 
-### 1. Absolute Zero Telemetry
-Windows natively collects vast amounts of diagnostic data, usage patterns, and error reports. We consider this unacceptable for both privacy and performance reasons.
-- **Approach:** We systematically disable all Connected User Experiences and Telemetry services. We null-route Microsoft telemetry endpoints using local host files and firewall rules. We strip out diagnostic scheduled tasks that run in the background.
+Null OS ships as a `.apbx` (a password-protected 7-Zip archive AME Wizard
+extracts). Two files matter:
 
-### 2. Maximum Privacy Lockdown
-A secure system is a private system. By default, Windows opts you into advertising IDs, location tracking, and content synchronization.
-- **Approach:** We enforce local accounts only. We disable Cortana, OneDrive integration, and Windows Search web results. Registry policies are applied at the machine and user level to explicitly deny permissions to tracking APIs.
+- **`playbook.conf`** — XML manifest. Metadata (Name, Version, SupportedBuilds,
+  Requirements) **and the feature-toggle GUI only** (`CheckboxPage` /
+  `RadioPage`). No actions live here. Each option exposes a `<Name>`.
+- **`Configuration/custom.yml`** — the execution engine, and the *only* file AME
+  runs. Every action is gated on a feature `<Name>` from `playbook.conf` via
+  `option: 'Name'` (or inverse `option: '!Name'`). Uncheck a box → its actions
+  are skipped.
 
-### 3. Brutal Performance & Low Latency
-Every background process consumes CPU cycles, RAM, and potentially interrupts hardware processing. For gamers and power users, latency is the enemy. Our concrete goal for Null OS is extreme: **70 background processes on idle, and a maximum of 1.5GB of RAM consumed on a fresh boot**.
-- **Approach:**
-  - **Service Culling:** We disable non-essential services (e.g., Print Spooler if you don't print, Xbox Live Auth if you don't use it, Windows Defender if you provide your own security context).
-  - **Network Stack Tuning:** Disabling Nagle's algorithm (TcpNoDelay), tuning MTU sizes, and disabling background intelligent transfer services (BITS) to ensure packets are processed instantly.
-  - **Input Latency:** Adjusting Win32PrioritySeparation and enforcing high-performance power plans so the CPU never downclocks when processing I/O interrupts.
+> `playbook.yaml` in the repo root is a dead signpost — AME ignores it. It only
+> exists to document that `custom.yml` is the real engine.
 
-### 4. Enterprise-Tier Engineering
-Unlike basic debloat scripts that run a few PowerShell commands and call it a day, Null OS uses AME Wizard's structured playbook system.
-- **Approach:** Every change is mapped in `playbook.yaml`. We separate modifications into distinct phases (Configuration, Scripts). We use strict version control. Changes must be justified by measurable performance improvements or explicit privacy gains.
+### Why the engine is self-contained
+Under this AME build, the TrustedInstaller node's working directory for launched
+processes is invalid: `exeDir: true` on `!cmd` / `!powerShell` fails with "the
+directory name is invalid". That means **bundled `.reg` imports and bundled
+`.ps1` launches both fail.** So `custom.yml` uses only forms proven to work:
 
-## The AME Wizard Flow
-The AME Wizard utilizes a `.apbx` playbook format. 
-1. The wizard extracts our playbook.
-2. It parses `playbook.yaml`.
-3. It executes the defined actions sequentially, running our Registry modifications and PowerShell scripts securely, often bypassing limitations that normal administrators face, thanks to TrustedUninstaller architecture.
+- Native directives that run internally as TrustedInstaller (no process launch):
+  `!registryValue`, `!service`, `!appx`, `!scheduledTask`.
+- Inline `!powerShell` with a `command: |` block and **no `exeDir`**.
+- `!run` for direct executables (e.g. `bcdedit`, `netsh`) with no `exeDir`.
 
-Null OS is not for everyone. It is for those who demand total control over their hardware.
+Inline PowerShell must be **Windows PowerShell 5.1-safe** (no ternary, no `??`,
+no `if`-as-expression). `0xffffffff` DWORDs are written via `reg add`, not
+`New-ItemProperty` (5.1 turns the literal into `-1`).
+
+### Build
+`build.ps1` packs `playbook.conf` + `Configuration/` into
+`dist\NullOS-<version>.apbx` (7-Zip, AES-256, encrypted headers, password
+`malte` — the fixed password AME Beta expects). It refuses to build if the
+required payload is missing and prints the SHA-256 of the artifact.
+
+## Safety Model (before anything changes)
+
+Null OS is brutal but reversible. Before the first modification, `custom.yml`:
+
+1. Enables System Restore and takes a **`Null OS Pre-Apply` restore point**.
+2. Exports **raw registry backups** (`HKLM\SYSTEM\...\Services`,
+   `HKLM\SOFTWARE\Policies\...\Windows`) and **`bcdedit /export`** to
+   `%SystemDrive%\NullOS-Backup`.
+
+Neither Atlas OS nor Revi OS takes a raw registry + BCD backup. This is the
+foundation of the reversibility guarantee.
+
+Per-user privacy changes are also written into the **default user hive**
+(`C:\Users\Default\NTUSER.DAT` loaded as `HKU\AME_UserHive_Default`), so newly
+created accounts inherit the lockdown, not just the current user.
+
+## Modules (gated, in apply order)
+
+| # | Module | Toggle | What it does |
+|---|---|---|---|
+| 0 | Rollback net | always | Restore point + raw reg/BCD backup; load default hive |
+| 1 | Telemetry | `Telemetry` | DiagTrack off, DataCollection/CEIP/Appraiser/WER policies, autologgers off, telemetry scheduled tasks disabled, **NVIDIA telemetry/updater workers tamed (display container kept)** |
+| 2 | Privacy | `Privacy` | Advertising ID, location, activity history, Cortana, web/Bing search, tailored experiences, Recall/Copilot AI data, dynamic lighting — machine + current user + default hive |
+| 3 | Network | `Networking` | LLMNR off, SMB bandwidth-throttle off, anonymous-access lockdown, Remote Assistance off (policy + firewall rule) |
+| 4 | Service cull | `ServiceCull` | ~50 non-essential services set to disabled (startup=4). **WSearch is never touched** (disabling it breaks Start/taskbar search) |
+| 4b | svchost grouping | `ForceSvcGrouping` | Raises `SvcHostSplitThresholdInKB` above installed RAM so per-service `svchost.exe` processes collapse into shared hosts — the single biggest idle-process-count drop. Takes effect on reboot |
+| 5 | Visual FX | `VisualFX` | Animations + transparency off; **ClearType font smoothing and tear-free DWM kept** |
+| 6 | Debloat | `Debloat` | Curated appx removal (Bing apps, Solitaire, Clipchamp, consumer Teams, Copilot, OneNote/People/Skype, Zune, Journal, etc.); Edge background/updater neutralized (+ optional full Edge removal via `RemoveEdge`, WebView2 preserved); Widgets/Feeds off; GameDVR background capture off (Game Pass apps kept) |
+| 7 | Hardware toggles | `!KeepBluetooth` / `!KeepPrintSpooler` / `!KeepXbox` | Inverse-gated: only removes Bluetooth / Print Spooler / Xbox UWP if you uncheck "keep" |
+| 7b | OEM trim (Lenovo) | `OEMDebloat` | Strips Lenovo telemetry/updater/marketing apps + tasks + services, with an explicit **keep-list protecting `ImControllerService` + Vantage thermal/power backend** so Fn+Q performance modes, fan control, and battery conservation still work |
+| 8 | Performance/latency | always + `LatencyExtreme` | Win32PrioritySeparation, network-throttling off, MMCSS Games profile, TcpAckFrequency/TCPNoDelay per NIC, `SvcHostSplitDisable`, last-access + FTH off, hiberboot off, power throttling off, high-performance plan; **Extreme** adds a custom `Null OS` power scheme + `DisablePagingExecutive` (desktop/plugged-in only) |
+| 9 | Kernel/boot | `KernelTweaks` | `disabledynamictick`, `tscsyncpolicy Enhanced`, remove `useplatformclock`, `DistributeTimers` — no forced HPET |
+| 9b | Danger (opt-in) | `DisableMitigations` / `DisableVBS` / `DisableMemoryCompression` | Spectre/Meltdown mitigations, VBS/HVCI/Credential Guard, RAM compression off. Anti-cheat CFG is re-enabled per-process even when system CFG is disabled |
+| 10 | Disk footprint | `GutWinSxS` / `GutWinSxSResetBase` | DISM component cleanup + remove `Windows.old`; ResetBase drops uninstall-updates ability. **Off by default** (slow — pulls WU/servicing) |
+| 10c | Update pinning | `PinWindowsBuild` | Defers feature updates 365d, quality 4d, pins `TargetReleaseVersion`. **Security patches still arrive** — the safe middle ground vs disabling WU entirely |
+| 11 | Danger (opt-in) | `DisableDefender` / `DisableWindowsUpdate` | Off by default; require you to provide your own equivalent |
+| 12 | Finalize | always | Unload default hive; write completion status |
+
+## What we deliberately keep
+
+Aggression only where it's free. Never at the cost of a broken system:
+
+- **WSearch** — disabling it breaks Start/taskbar search.
+- **ctfmon** — breaks text input.
+- **DWM** — mandatory compositor.
+- **NvContainerLocalSystem** — drives Optimus / hybrid-graphics display
+  switching; killing it can black-screen a laptop.
+- **ImControllerService + Vantage thermal/power backend** — Fn keys, fan
+  control, performance modes.
+- **Gaming dependencies** (GamingServices, Xbox auth when Xbox kept) and the
+  **WebView2 runtime** (even when Edge is fully removed).
+
+## Proof, not marketing
+
+Every performance claim ships with a reproducible receipt. `bench/` contains the
+**baseline harness** (`Measure-Baseline.ps1`): capture idle process count, RAM in
+use, boot time, DPC latency, and appx/service counts on a clean VM before apply
+and again after, then diff them. See [`bench/README.md`](../bench/README.md).
+
+Idle RAM is shell-bound (explorer / dwm / SearchHost are unremovable), so the
+honest metric on real hardware is **delta vs clean Windows**, captured by the
+harness — not a fixed absolute. Numbers without a matching report in
+`bench/reports/` are not published.
+
+## Differentiators vs Atlas OS / Revi OS
+
+- **Reversible by design** — raw reg/BCD backup + restore point they don't take.
+- **Hardware-aware** — surgical Lenovo/NVIDIA trimming instead of vendor-agnostic
+  blanket removal.
+- **Update pinning** instead of killing Windows Update — you keep security
+  patches and lose only day-one breakage.
+- **Provable** — the `bench/` harness makes every claim checkable.
+
+Null OS is not for everyone. It's for those who demand total, *undoable* control
+over their hardware.
