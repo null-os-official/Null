@@ -69,6 +69,8 @@ gated behind a toggle, and undoable.
   the full module breakdown (matches `Configuration/custom.yml` line-for-line).
 - [`docs/PROFILES.md`](docs/PROFILES.md) — Competitive / Daily / Laptop
   recommended-toggle matrix.
+- [`docs/INSTALL-ISO.md`](docs/INSTALL-ISO.md) — install paths, Audit-Mode clean
+  integration, and release signing.
 - [`bench/README.md`](bench/README.md) — the baseline harness.
 - [`control/README.md`](control/README.md) — Null Control Center (post-install
   dashboard + re-enable + restore).
