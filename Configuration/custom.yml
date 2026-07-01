@@ -267,10 +267,16 @@ actions:
   - !appx: {name: 'Disney.37853FC22B2CE*', type: family, option: 'Debloat'}
   - !appx: {name: 'SpotifyAB.SpotifyMusic*', type: family, option: 'Debloat'}
   - !appx: {name: 'Microsoft.MicrosoftJournal*', type: family, option: 'Debloat'}
+  - !appx: {name: 'MicrosoftCorporationII.QuickAssist*', type: family, option: 'Debloat'}
+  - !appx: {name: 'Microsoft.Windows.Ai.Copilot.Provider*', type: family, option: 'Debloat'}
+  # NOTE: MicrosoftWindows.Client.WebExperience (Widgets host) is intentionally
+  # NOT appx-removed - it can break the taskbar/widgets host on some builds.
+  # It is already neutralised by the AllowNewsAndInterests/EnableFeeds policies.
   # Xbox UWP only if "Keep Xbox" is unchecked (GamingServices always kept).
   - !appx: {name: 'Microsoft.XboxGamingOverlay*', type: family, option: '!KeepXbox'}
   - !appx: {name: 'Microsoft.XboxGameOverlay*', type: family, option: '!KeepXbox'}
   - !appx: {name: 'Microsoft.XboxSpeechToTextOverlay*', type: family, option: '!KeepXbox'}
+  - !appx: {name: 'Microsoft.Xbox.TCUI*', type: family, option: '!KeepXbox'}
   - !appx: {name: 'Microsoft.GamingApp*', type: family, option: '!KeepXbox'}
 
   # Edge background + updater (Edge itself kept; kills EdgeWebView2 boost + updater procs)
