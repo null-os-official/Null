@@ -319,6 +319,34 @@ actions:
   - !registryValue: {path: 'HKCU\SOFTWARE\Microsoft\GameBar', value: 'ShowStartupPanel', data: '0', type: REG_DWORD, option: 'Debloat'}
 
   # ===========================================================================
+  # 6b. ONEDRIVE REMOVAL (opt-in; local files kept, cloud sync stops)
+  # ===========================================================================
+  - !writeStatus: {status: 'Removing OneDrive (if selected)'}
+  # Block file sync via policy - machine-wide, so it also covers new users.
+  - !registryValue: {path: 'HKLM\SOFTWARE\Policies\Microsoft\Windows\OneDrive', value: 'DisableFileSyncNGSC', data: '1', type: REG_DWORD, option: 'RemoveOneDrive'}
+  - !registryValue: {path: 'HKLM\SOFTWARE\Policies\Microsoft\Windows\OneDrive', value: 'DisableFileSync', data: '1', type: REG_DWORD, option: 'RemoveOneDrive'}
+  - !powerShell:
+    wait: true
+    option: 'RemoveOneDrive'
+    command: |
+      # Stop the client, then run Microsoft's own per-arch uninstaller(s).
+      & taskkill /f /im OneDrive.exe 2>$null
+      & taskkill /f /im FileCoAuth.exe 2>$null
+      $setups = @("$env:SystemRoot\System32\OneDriveSetup.exe","$env:SystemRoot\SysWOW64\OneDriveSetup.exe")
+      Get-ChildItem "$env:LOCALAPPDATA\Microsoft\OneDrive\*\OneDriveSetup.exe" -EA SilentlyContinue | ForEach-Object { $setups += $_.FullName }
+      foreach ($s in $setups) { if (Test-Path $s) { Start-Process -FilePath $s -ArgumentList '/uninstall' -Wait -EA SilentlyContinue } }
+      # Remove leftover scheduled tasks + per-user Run entries.
+      Get-ScheduledTask -EA SilentlyContinue | Where-Object { $_.TaskName -like 'OneDrive*' } | Unregister-ScheduledTask -Confirm:$false -EA SilentlyContinue
+      & reg delete 'HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' /v OneDrive /f 2>$null
+      & reg delete 'HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' /v OneDriveSetup /f 2>$null
+      # Remove the File Explorer navigation-pane entry (64- and 32-bit views).
+      & reg delete 'HKCR\CLSID\{018D5C66-4533-4307-9B53-224DE2ED1FE6}' /f 2>$null
+      & reg delete 'HKCR\Wow6432Node\CLSID\{018D5C66-4533-4307-9B53-224DE2ED1FE6}' /f 2>$null
+      # Deprovision the Store OneDrive package if present (Win32 client uninstalled above).
+      Get-AppxPackage -AllUsers 'Microsoft.OneDriveSync*' -EA SilentlyContinue | Remove-AppxPackage -EA SilentlyContinue
+      Write-Output 'OneDrive removed: client uninstalled, sync policy set, tasks + Explorer entry cleaned'
+
+  # ===========================================================================
   # 7. HARDWARE SERVICE TOGGLES (inverse-gated)
   # ===========================================================================
   - !service: {name: 'bthserv', operation: change, startup: 4, ignoreErrors: true, option: '!KeepBluetooth'}
