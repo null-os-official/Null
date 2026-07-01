@@ -1,5 +1,7 @@
 # Null OS
 
+[![validate-build](https://github.com/null-os-official/Null/actions/workflows/ci.yml/badge.svg)](https://github.com/null-os-official/Null/actions/workflows/ci.yml)
+
 Null OS isn't another debloat script. It's a highly opinionated, brutally
 optimized configuration for **Windows 11 Pro**, applied cleanly through **AME
 Wizard Beta** as a single `.apbx` playbook. It strips telemetry, culls

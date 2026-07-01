@@ -1,0 +1,65 @@
+name: validate-build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate playbook.conf (metadata + 4-option page limit)
+        shell: pwsh
+        run: |
+          [xml]$c = Get-Content playbook.conf -Raw
+          $req = 'Name','Username','ShortDescription','Title','Description','Version','UniqueId'
+          foreach ($r in $req) { if (-not $c.Playbook.$r) { throw "playbook.conf missing <$r>" } }
+          $i = 0; $bad = @()
+          foreach ($p in $c.Playbook.FeaturePages.CheckboxPage) {
+            $i++; $n = @($p.Options.CheckboxOption).Count
+            if ($n -gt 4) { $bad += "page $i has $n options" }
+          }
+          if ($bad) { throw ("CheckboxPage 4-option limit violated: " + ($bad -join '; ')) }
+          Write-Host "conf OK: v$($c.Playbook.Version), $i checkbox page(s)"
+
+      - name: No tabs in custom.yml
+        shell: pwsh
+        run: |
+          if (Select-String -Path Configuration/custom.yml -Pattern "`t" -Quiet) { throw "tab character found in custom.yml" }
+          Write-Host "no tabs"
+
+      - name: Validate custom.yml (YAML parse, AME tags tolerated)
+        shell: pwsh
+        run: |
+          python -m pip install --quiet pyyaml
+          python .github/scripts/validate_yaml.py
+
+      - name: Lint scripts (PSScriptAnalyzer, informational)
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -ErrorAction SilentlyContinue
+          Invoke-ScriptAnalyzer -Path bench,control -Recurse -Severity Warning,Error |
+            Format-Table -AutoSize
+
+      - name: Build .apbx
+        shell: pwsh
+        run: ./build.ps1
+
+      - name: Harness self-run (capture-only, proves the harness executes)
+        shell: pwsh
+        run: ./bench/Measure-Baseline.ps1 -Profile ci -Label runner
+
+      - name: Upload build + reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: nullos-build
+          path: |
+            dist/*.apbx
+            bench/reports/*.json
+            bench/reports/*.md
+          if-no-files-found: warn
