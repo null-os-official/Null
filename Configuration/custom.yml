@@ -433,6 +433,60 @@ actions:
       Write-Output 'Lenovo telemetry/updater/marketing trimmed; ImController + Vantage thermal kept'
 
   # ===========================================================================
+  # 7c. MULTI-VENDOR OEM TRIM (Dell / HP / ASUS + AMD) - best-effort, keep-listed
+  # Detects the system manufacturer and disables ONLY telemetry/updater/marketing
+  # tasks + services matching known patterns. Thermal/fan/hotkey/driver backends
+  # are protected by per-vendor keep-lists. Unknown names simply no-op.
+  # NOTE: verified on Lenovo; Dell/HP/ASUS branches are best-effort and unproven
+  # on that hardware - conservative pattern-matching + keep-lists keep it safe.
+  # ===========================================================================
+  - !writeStatus: {status: 'Trimming OEM telemetry (multi-vendor)'}
+  - !powerShell:
+    wait: true
+    option: 'OEMDebloat'
+    command: |
+      $manu = ''
+      try { $manu = (Get-CimInstance Win32_ComputerSystem -EA Stop).Manufacturer } catch {}
+      $manu = "$manu".ToLower()
+      function KillTasks($pat){ Get-ScheduledTask -EA SilentlyContinue | Where-Object { $_.TaskName -match $pat -or $_.TaskPath -match $pat } | Disable-ScheduledTask -EA SilentlyContinue | Out-Null }
+      function KillSvc($namePat,$keep){ Get-Service -EA SilentlyContinue | Where-Object { $_.Name -match $namePat -and ($keep -notcontains $_.Name) } | ForEach-Object { Set-Service -Name $_.Name -StartupType Disabled -EA SilentlyContinue; Stop-Service -Name $_.Name -Force -EA SilentlyContinue } }
+      function KillAppx($pat){ Get-AppxPackage -AllUsers -EA SilentlyContinue | Where-Object { $_.Name -match $pat } | Remove-AppxPackage -EA SilentlyContinue }
+
+      if ($manu -match 'dell') {
+        # KEEP: Dell Power Manager (thermal/battery) + Dell Command backend.
+        KillSvc 'SupportAssist|DDVCollectorSvcApi|DDVDataCollector|DDVRulesProcessor|DellDataVault' @('DellClientManagementService')
+        KillTasks 'SupportAssist|DellDataVault|Dell.*Update|Dell.*Telemetry'
+        KillAppx 'DellInc\.DellSupportAssist|DellInc\.DellDigitalDelivery|DellInc\.DellCustomerConnect'
+        Write-Output 'Dell telemetry/SupportAssist trimmed; Power Manager kept'
+      }
+      elseif ($manu -match 'hp|hewlett') {
+        # KEEP: HP audio, hotkeys (HotKeyServiceUWP), HP Command Center (thermal), HP Wolf (security).
+        KillSvc 'HPAppHelperCap|HPDiagsCap|HPSysInfoCap|HPNetworkCap' @('HotKeyServiceUWP')
+        KillTasks 'HP.*Analytics|HP.*Telemetry|HP Support Assistant|HPCustomer'
+        KillAppx 'AD2F1837\.HPSupportAssistant|AD2F1837\.HPJumpStarts|AD2F1837\.HPConnectionOptimizer|AD2F1837\.HPPrivacySettings'
+        Write-Output 'HP support-assistant/analytics trimmed; audio/hotkeys/Wolf kept'
+      }
+      elseif ($manu -match 'asus') {
+        # KEEP: Armoury Crate (fan/RGB), ASUS System Control Interface (hotkeys/thermal).
+        KillSvc 'ASUSSoftwareManager|ASUSLinkNear|ASUSSwitch' @('AsusCertService','ASUSSystemAnalysis','asComSvc','AsusAppService')
+        KillTasks 'ASUS.*Update|ASUS.*Telemetry|GiftBox|ProductRegister|MyASUS.*Analytics'
+        KillAppx 'B9ECED6F\.ASUSGiftBox'
+        Write-Output 'ASUS giftbox/updater/telemetry trimmed; Armoury + control interface kept'
+      }
+      else { Write-Output "no extra-OEM branch for manufacturer '$manu' (Lenovo handled in 7b)" }
+
+      # AMD is a component vendor, not a system OEM - key off hardware presence.
+      $amd = $false
+      try { if (((Get-CimInstance Win32_Processor -EA SilentlyContinue).Name -match 'AMD') -or ((Get-CimInstance Win32_VideoController -EA SilentlyContinue).Name -match 'AMD|Radeon')) { $amd = $true } } catch {}
+      if ($amd) {
+        # KEEP the driver + AMD External Events (FreeSync/overlay). Opt out of the UX telemetry program only.
+        Get-ScheduledTask -EA SilentlyContinue | Where-Object { $_.TaskName -match 'AMD.*User Experience' } | Disable-ScheduledTask -EA SilentlyContinue | Out-Null
+        New-Item -Path 'HKLM:\SOFTWARE\AMD\CN' -Force -EA SilentlyContinue | Out-Null
+        New-ItemProperty -Path 'HKLM:\SOFTWARE\AMD\CN' -Name 'UXPStatus' -Value 0 -PropertyType DWord -Force -EA SilentlyContinue | Out-Null
+        Write-Output 'AMD User Experience Program opted out; driver + External Events kept'
+      }
+
+  # ===========================================================================
   # 8. PERFORMANCE / LATENCY ENGINE (inline; no exeDir)
   # ===========================================================================
   - !writeStatus: {status: 'Applying performance and latency tuning'}
