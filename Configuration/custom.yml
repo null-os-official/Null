@@ -148,6 +148,46 @@ actions:
   - !run: {exe: 'netsh', args: 'advfirewall firewall set rule group="Remote Assistance" new enable=no', option: 'Networking'}
 
   # ===========================================================================
+  # 3b. TELEMETRY HOST BLOCK (opt-in; hosts-file null-route, clearly marked)
+  # Firewall-by-hostname is not possible and telemetry IP lists rot, so we use
+  # the hosts file only - the reliable, reversible DNS-level lever. Update,
+  # activation, licensing, and store domains are deliberately left untouched.
+  # ===========================================================================
+  - !writeStatus: {status: 'Blocking telemetry domains (if selected)'}
+  - !powerShell:
+    wait: true
+    option: 'BlockTelemetryHosts'
+    command: |
+      $hosts = "$env:SystemRoot\System32\drivers\etc\hosts"
+      $start = '# NULL OS TELEMETRY BLOCK START'
+      $end   = '# NULL OS TELEMETRY BLOCK END'
+      $domains = @(
+        'vortex.data.microsoft.com','vortex-win.data.microsoft.com',
+        'telecommand.telemetry.microsoft.com','telemetry.microsoft.com',
+        'watson.telemetry.microsoft.com','watson.microsoft.com',
+        'oca.telemetry.microsoft.com','sqm.telemetry.microsoft.com',
+        'v10.events.data.microsoft.com','v20.events.data.microsoft.com',
+        'v10.vortex-win.data.microsoft.com','self.events.data.microsoft.com',
+        'eu-v10.events.data.microsoft.com','us-v10.events.data.microsoft.com',
+        'settings-win.data.microsoft.com','browser.events.data.msn.com'
+      )
+      $content = @()
+      if (Test-Path $hosts) { $content = Get-Content $hosts -EA SilentlyContinue }
+      # Strip any previous Null OS block first so re-runs stay idempotent.
+      $clean = @(); $skip = $false
+      foreach ($line in $content) {
+        if ($line -eq $start) { $skip = $true; continue }
+        if ($line -eq $end)   { $skip = $false; continue }
+        if (-not $skip) { $clean += $line }
+      }
+      $block = @($start)
+      foreach ($d in $domains) { $block += "0.0.0.0 $d" }
+      $block += $end
+      Set-Content -Path $hosts -Value ($clean + $block) -Encoding ASCII -Force
+      & ipconfig /flushdns | Out-Null
+      Write-Output "telemetry hosts block written ($($domains.Count) domains)"
+
+  # ===========================================================================
   # 4. SERVICE CULL (core kept: WSearch, Audio, Wi-Fi, Themes, FrameServer...)
   # ===========================================================================
   - !writeStatus: {status: 'Culling background services'}

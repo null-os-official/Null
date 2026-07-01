@@ -23,7 +23,7 @@
 
 [CmdletBinding()]
 param(
-    [ValidateSet('status','enable-defender','enable-update','enable-vbs','redebloat','restore-backup')]
+    [ValidateSet('status','enable-defender','enable-update','enable-vbs','redebloat','restore-backup','unblock-telemetry-hosts')]
     [string]$Action = 'status',
 
     [string]$BackupDir = "$env:SystemDrive\NullOS-Backup",
@@ -100,6 +100,12 @@ function Get-NullState {
     $od = (Test-Path "$env:SystemRoot\System32\OneDriveSetup.exe") -or (Test-Path "$env:LOCALAPPDATA\Microsoft\OneDrive\OneDrive.exe")
     $s['OneDrive removed']      = (-not $od)
 
+    # Telemetry hosts block marker
+    $hostsFile = "$env:SystemRoot\System32\drivers\etc\hosts"
+    $blocked = $false
+    if (Test-Path $hostsFile) { if (Select-String -Path $hostsFile -Pattern 'NULL OS TELEMETRY BLOCK START' -Quiet -EA SilentlyContinue) { $blocked = $true } }
+    $s['Telemetry hosts blocked'] = $blocked
+
     return $s
 }
 
@@ -137,6 +143,7 @@ function Show-Status {
     Write-Host "    -Action enable-update     restore Windows Update services + policy"
     Write-Host "    -Action enable-vbs        restore VBS / memory integrity"
     Write-Host "    -Action redebloat         re-run the live appx purge"
+    Write-Host "    -Action unblock-telemetry-hosts   remove the hosts-file telemetry block"
     Write-Host "    -Action restore-backup    reg/BCD restore from $BackupDir"
     Write-Host ""
 }
@@ -197,6 +204,24 @@ function Invoke-Redebloat {
     Write-Host "Live re-debloat done. Packages removed this pass: $removed" -ForegroundColor Green
 }
 
+function Unblock-TelemetryHosts {
+    Require-Admin
+    $hosts = "$env:SystemRoot\System32\drivers\etc\hosts"
+    $start = '# NULL OS TELEMETRY BLOCK START'
+    $end   = '# NULL OS TELEMETRY BLOCK END'
+    if (-not (Test-Path $hosts)) { Write-Host "No hosts file."; return }
+    $content = Get-Content $hosts -EA SilentlyContinue
+    $clean = @(); $skip = $false
+    foreach ($line in $content) {
+        if ($line -eq $start) { $skip = $true; continue }
+        if ($line -eq $end)   { $skip = $false; continue }
+        if (-not $skip) { $clean += $line }
+    }
+    Set-Content -Path $hosts -Value $clean -Encoding ASCII -Force
+    & ipconfig /flushdns | Out-Null
+    Write-Host "Null OS telemetry hosts block removed." -ForegroundColor Green
+}
+
 function Restore-Backup {
     Require-Admin
     if (-not (Test-Path $BackupDir)) { Write-Host "No backup found at $BackupDir" -ForegroundColor Red; exit 1 }
@@ -223,4 +248,5 @@ switch ($Action) {
     'enable-vbs'      { Enable-Vbs }
     'redebloat'       { Invoke-Redebloat }
     'restore-backup'  { Restore-Backup }
+    'unblock-telemetry-hosts' { Unblock-TelemetryHosts }
 }
