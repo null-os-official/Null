@@ -623,6 +623,39 @@ actions:
       Write-Output "Build pinned to $rel; quality +4d, feature +365d"
 
   # ===========================================================================
+  # 10d. FIRST-BOOT SELF-HEAL (fixes flaky over-install appx purge)
+  # Over-existing-install applies sometimes leave appx behind. This writes a
+  # readable self-heal script to C:\ProgramData\NullOS and registers a one-shot
+  # RunOnce that re-purges the bloat list and drops a receipt on first logon.
+  # Gated on Debloat so it only runs if debloating was actually selected.
+  # ===========================================================================
+  - !writeStatus: {status: 'Registering first-boot self-heal'}
+  - !powerShell:
+    wait: true
+    option: 'Debloat'
+    command: |
+      $dir = "$env:ProgramData\NullOS"
+      New-Item -ItemType Directory -Path $dir -Force -EA SilentlyContinue | Out-Null
+      $script = @(
+        '$ErrorActionPreference=''SilentlyContinue'''
+        '$dir=''C:\ProgramData\NullOS'''
+        '$fams=@(''Microsoft.BingNews'',''Microsoft.BingWeather'',''Microsoft.BingSearch'',''Microsoft.Microsoft3DViewer'',''Microsoft.MicrosoftSolitaireCollection'',''Microsoft.MicrosoftOfficeHub'',''Microsoft.Office.OneNote'',''Microsoft.People'',''microsoft.windowscommunicationsapps'',''Microsoft.SkypeApp'',''Microsoft.Getstarted'',''Microsoft.GetHelp'',''Microsoft.WindowsFeedbackHub'',''Microsoft.MixedReality.Portal'',''Microsoft.WindowsMaps'',''Microsoft.WindowsSoundRecorder'',''Microsoft.Todos'',''Microsoft.PowerAutomateDesktop'',''Microsoft.Windows.DevHome'',''Microsoft.OutlookForWindows'',''MicrosoftTeams'',''MSTeams'',''Clipchamp.Clipchamp'',''Microsoft.549981C3F5F10'',''Microsoft.Copilot'',''MicrosoftCorporationII.MicrosoftFamily'',''Microsoft.ZuneVideo'',''Microsoft.ZuneMusic'',''Microsoft.MicrosoftJournal'',''MicrosoftCorporationII.QuickAssist'',''Microsoft.Windows.Ai.Copilot.Provider'')'
+        '$removed=0'
+        'foreach($f in $fams){'
+        ' Get-AppxPackage -AllUsers ($f+''*'') | ForEach-Object { try{ Remove-AppxPackage -Package $_.PackageFullName -AllUsers -EA Stop; $removed++ }catch{} }'
+        ' Get-AppxProvisionedPackage -Online | Where-Object { $_.DisplayName -like ($f+''*'') } | ForEach-Object { try{ Remove-AppxProvisionedPackage -Online -PackageName $_.PackageName -EA Stop | Out-Null }catch{} }'
+        '}'
+        '$procs=(Get-Process).Count'
+        '$os=Get-CimInstance Win32_OperatingSystem'
+        '$ram=[math]::Round(($os.TotalVisibleMemorySize-$os.FreePhysicalMemory)/1MB,2)'
+        '$stamp=(Get-Date).ToString(''s'')'
+        '(''[''+$stamp+''] Null OS self-heal: removed=''+$removed+'' procs=''+$procs+'' ramGB=''+$ram) | Out-File ($dir+''\selfheal-receipt.txt'') -Append -Encoding utf8'
+      )
+      Set-Content -Path "$dir\selfheal.ps1" -Value $script -Encoding UTF8 -Force
+      & reg add 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' /v NullOSSelfHeal /t REG_SZ /d 'powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\ProgramData\NullOS\selfheal.ps1"' /f | Out-Null
+      Write-Output 'first-boot self-heal registered (RunOnce -> C:\ProgramData\NullOS\selfheal.ps1)'
+
+  # ===========================================================================
   # 11. DANGER ZONE (off by default)
   # ===========================================================================
   - !registryValue: {path: 'HKLM\SOFTWARE\Policies\Microsoft\Windows Defender', value: 'DisableAntiSpyware', data: '1', type: REG_DWORD, option: 'DisableDefender'}
