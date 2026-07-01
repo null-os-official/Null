@@ -65,7 +65,11 @@ gated behind a toggle, and undoable.
 ## Documentation
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — execution model, safety, and
   the full module breakdown (matches `Configuration/custom.yml` line-for-line).
+- [`docs/PROFILES.md`](docs/PROFILES.md) — Competitive / Daily / Laptop
+  recommended-toggle matrix.
 - [`bench/README.md`](bench/README.md) — the baseline harness.
+- [`control/README.md`](control/README.md) — Null Control Center (post-install
+  dashboard + re-enable + restore).
 
 ## Contributing
 Know Windows internals, networking stacks, or kernel tuning? Read the
